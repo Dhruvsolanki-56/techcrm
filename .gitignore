@@ -1,0 +1,12 @@
+node_modules/
+data/
+demo-data/
+*.log
+*.db
+*.db-wal
+*.db-shm
+.vault.key
+.env
+.env.*
+public/*.tmp.js
+.netlify/

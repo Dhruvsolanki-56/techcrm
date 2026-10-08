@@ -1,0 +1,24 @@
+# Netlify serves the screens (public/) and forwards every /api call to the Render server,
+# so the whole demo runs on the Netlify address with same-origin cookies.
+# If your Render service gets a different address, change it in the first redirect.
+[build]
+  publish = "public"
+  command = "echo 'static site, nothing to build'"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://techcrm-demo.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Strict-Transport-Security = "max-age=15552000"
+    Cache-Control = "no-cache"
