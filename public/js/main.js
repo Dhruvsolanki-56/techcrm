@@ -1,4 +1,4 @@
-/* App shell: auth screens, sidebar, inbox, command palette, router */
+/* App shell: auth screens, sidebar, notification bell, command palette, router */
 'use strict';
 
 const Router = {
@@ -18,9 +18,9 @@ const Router = {
     const my = ++Router.seq; const el = $('#view'); const { path, query } = Router.parse(); const hit = Router.match(path);
     Shell.highlight(path); $('#side')?.classList.remove('open'); $$('.popover').forEach((p) => p.remove());
     const msg = (t, s) => `<header class="ph"><div class="crumbs"><b>${t}</b></div></header><div class="empty" style="margin-top:80px"><b>${t}</b>${s}</div>`;
-    if (!hit) { el.innerHTML = `<div id="page">${msg('Page not found', '<div style="margin-top:12px"><a class="btn" href="#/dashboard">Go home</a></div>')}</div>`; return; }
+    if (!hit) { el.innerHTML = `<div id="page">${msg('Page not found', '<div style="margin-top:12px"><a class="btn" href="#/dashboard">Go home</a></div>')}</div>`; Shell.mountBell(el); return; }
     const { route: r, params } = hit;
-    if ((r.founder && !isFounder()) || (r.needs && !can(r.needs))) { el.innerHTML = `<div id="page">${msg('No access', 'Your account does not include this area. Ask a founder if you need it.')}</div>`; return; }
+    if ((r.founder && !isFounder()) || (r.needs && !can(r.needs))) { el.innerHTML = `<div id="page">${msg('No access', 'Your account does not include this area. Ask a founder if you need it.')}</div>`; Shell.mountBell(el); return; }
     document.title = `${r.title || 'CRM'} · ${App.lookups.settings.company_name || 'CRM'}`;
     // show a skeleton only if loading is noticeable (avoids a flash on fast loads); refreshes keep the current page
     const kind = path === '/dashboard' ? 'dash' : /\/\d+$/.test(path) ? 'record' : 'list';
@@ -31,12 +31,12 @@ const Router = {
       await r.handler({ el: holder, params, query });
       clearTimeout(skT);
       if (my !== Router.seq) return;
-      el.innerHTML = ''; el.appendChild(holder); if (!Router.keepScroll) countUp(holder); if (!Router.keepScroll) window.scrollTo(0, 0); Router.keepScroll = false;
+      el.innerHTML = ''; el.appendChild(holder); Shell.mountBell(holder); if (!Router.keepScroll) countUp(holder); if (!Router.keepScroll) window.scrollTo(0, 0); Router.keepScroll = false;
     } catch (e) {
       clearTimeout(skT);
       if (my !== Router.seq) return;
       console.error(e);
-      el.innerHTML = `<div id="page"><header class="ph"><div class="crumbs"><b>${esc(r.title || 'Page')}</b></div></header><div class="empty iconic-lg" style="margin-top:80px"><span class="em-i">${icon('alert')}</span><b>This page did not load</b>${esc(e.message)}<div class="row" style="margin-top:14px;justify-content:center"><button class="btn primary" id="retry" type="button">${icon('refresh')}Try again</button><a class="btn" href="#/dashboard">Go home</a></div></div></div>`;
+      el.innerHTML = `<div id="page"><header class="ph"><div class="crumbs"><b>${esc(r.title || 'Page')}</b></div></header><div class="empty iconic-lg" style="margin-top:80px"><span class="em-i">${icon('alert')}</span><b>This page did not load</b>${esc(e.message)}<div class="row" style="margin-top:14px;justify-content:center"><button class="btn primary" id="retry" type="button">${icon('refresh')}Try again</button><a class="btn" href="#/dashboard">Go home</a></div></div></div>`; Shell.mountBell(el);
       $('#retry', el).addEventListener('click', (ev) => { ev.currentTarget.classList.add('busy'); Router.render(); });
     }
   },
@@ -63,7 +63,31 @@ const Shell = {
   mark() { const s = App.lookups.settings || {}; return `<span class="mark">${s.logo ? `<img src="${esc(s.logo)}" alt="">` : esc((s.company_name || 'T')[0])}</span>`; },
   refreshBrand() { const b = $('#ws'); if (b) b.innerHTML = `${Shell.mark()}<span class="nm">${esc(App.lookups.settings.company_name || 'CRM')}</span>`; },
   async notifCount() {
-    try { const n = await GET('/notifications'); Shell.notifs = n.items; Shell.unread = n.unread; const c = $('#inbox-count'); if (c) { c.textContent = n.unread; c.classList.toggle('hidden', !n.unread); } } catch { /* ignore */ }
+    try { const n = await GET('/notifications'); const more = n.unread > Shell.unread; Shell.notifs = n.items; Shell.unread = n.unread; Shell.paintBells(more); } catch { /* ignore */ }
+  },
+  bell: () => `<button class="btn icon ghost bell" type="button" data-bell aria-label="Notifications" aria-haspopup="dialog">${icon('bell')}<span class="bell-n hidden" aria-hidden="true"></span></button>`,
+  paintBells(ring) {
+    $$('[data-bell]').forEach((b) => {
+      const n = $('.bell-n', b); n.textContent = Shell.unread > 9 ? '9+' : Shell.unread; n.classList.toggle('hidden', !Shell.unread);
+      b.setAttribute('aria-label', Shell.unread ? `Notifications, ${Shell.unread} unread` : 'Notifications');
+      if (ring) { b.classList.remove('ring'); void b.offsetWidth; b.classList.add('ring'); }
+    });
+  },
+  // every page header gets the bell at its right end (phones use the one in the top bar)
+  mountBell(root) {
+    const ph = $('.ph', root); if (!ph || $('[data-bell]', ph)) return;
+    let a = $('.actions', ph); if (!a) { a = document.createElement('div'); a.className = 'actions'; ph.appendChild(a); }
+    a.insertAdjacentHTML('beforeend', `${a.children.length ? '<span class="bell-sep" aria-hidden="true"></span>' : ''}${Shell.bell()}`);
+    Shell.paintBells(false);
+  },
+  async openBell(btn) {
+    if (Shell.bellWasOpen || $('.popover.notifs')) { Shell.bellWasOpen = false; $$('.popover.notifs').forEach((p) => p.remove()); return; }   // second click closes
+    await Shell.notifCount(); const items = Shell.notifs;
+    const p = popover(btn, `<div class="pop-h"><span>Notifications</span>${Shell.unread ? '<button class="btn sm ghost" id="readall">Mark all read</button>' : ''}</div>
+      <div class="notif-list">${items.length ? items.map((n) => `<a class="notif ${n.read ? '' : 'unread'}" href="${esc(n.link || '#/dashboard')}">${esc(n.text)}<div class="w">${ago(n.at)}</div></a>`).join('') : `<div class="empty mini iconic"><span class="em-i">${icon('bell')}</span><span>You are all caught up.</span></div>`}</div>`, { placement: 'below-end', cls: 'notifs' });
+    p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', 'Notifications');
+    const ra = $('#readall', p); if (ra) ra.addEventListener('click', async () => { await POST('/notifications/read'); await Shell.notifCount(); p.remove(); });
+    $$('a', p).forEach((a) => a.addEventListener('click', () => p.remove()));
   },
   build() {
     const nav = NAV.map((g) => {
@@ -73,20 +97,15 @@ const Shell = {
     $('#app').innerHTML = `<div class="app"><aside class="side" id="side">
         <div class="ws" id="ws"></div>
         <button class="cmdk" id="cmdk">${icon('search')}<span>Search…</span><kbd>Ctrl K</kbd></button>
-        <nav class="nav" id="nav"><button id="inbox">${icon('inbox')}<span>Inbox</span><span class="count hidden" id="inbox-count">0</span></button>${nav}</nav>
+        <nav class="nav" id="nav">${nav}</nav>
         <div class="side-foot"><button class="me" id="me">${avatar(App.user.name)}<span class="grow"><div class="n ellipsis">${esc(App.user.name)}</div><div class="r">${isFounder() ? 'Founder' : 'Intern'}</div></span></button></div>
       </aside>
-      <div class="main"><div class="mobilebar"><button class="btn icon ghost" id="burger" aria-label="Menu">${icon('menu')}</button><span class="grow ellipsis">${esc(App.lookups.settings.company_name || 'CRM')}</span><button class="btn icon ghost" id="msearch" aria-label="Search">${icon('search')}</button></div>
+      <div class="main"><div class="mobilebar"><button class="btn icon ghost" id="burger" aria-label="Menu">${icon('menu')}</button><span class="grow ellipsis">${esc(App.lookups.settings.company_name || 'CRM')}</span><button class="btn icon ghost" id="msearch" aria-label="Search">${icon('search')}</button>${Shell.bell()}</div>
       <main id="view"></main></div></div>`;
     Shell.refreshBrand();
     $('#burger').addEventListener('click', () => $('#side').classList.toggle('open'));
     $('#cmdk').addEventListener('click', () => Palette.open()); $('#msearch').addEventListener('click', () => Palette.open());
-    $('#inbox').addEventListener('click', async (e) => {
-      const btn = e.currentTarget; await Shell.notifCount(); const items = Shell.notifs;
-      const p = popover(btn, `<div class="pop-h"><span>Inbox</span>${Shell.unread ? '<button class="btn sm ghost" id="readall">Mark all read</button>' : ''}</div>${items.length ? items.map((n) => `<a class="notif ${n.read ? '' : 'unread'}" href="${esc(n.link || '#/dashboard')}">${esc(n.text)}<div class="w">${ago(n.at)}</div></a>`).join('') : '<div class="empty mini">You are all caught up.</div>'}`, { placement: 'right' });
-      const ra = $('#readall', p); if (ra) ra.addEventListener('click', async () => { await POST('/notifications/read'); await Shell.notifCount(); p.remove(); });
-      $$('a', p).forEach((a) => a.addEventListener('click', () => p.remove()));
-    });
+    if (!Shell.bellWired) { Shell.bellWired = true; delegate(document.body, '[data-bell]', 'click', (b) => Shell.openBell(b)); document.addEventListener('mousedown', (e) => { Shell.bellWasOpen = !!(e.target.closest && e.target.closest('[data-bell]') && $('.popover.notifs')); }, true); }   // once, even if the shell is rebuilt after signing in again
     $('#me').addEventListener('click', (e) => {
       const p = popover(e.currentTarget, `<div style="padding:10px 14px 8px"><div style="font-weight:600">${esc(App.user.name)}</div><div class="small muted">${esc(App.user.email)}</div></div>
         <div class="menu-i" id="m-pw">${icon('key')}Change password</div><div class="menu-i" id="m-2fa">${icon('shield')}Two-step login <span class="grow"></span><span class="small ${App.user.two_factor ? '' : 'warn'}">${App.user.two_factor ? 'On' : 'Off'}</span></div><div class="menu-i" id="m-out">${icon('logout')}Sign out</div>`, { cls: 'narrow', placement: 'above' });

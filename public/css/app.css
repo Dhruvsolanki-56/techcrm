@@ -577,3 +577,15 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--red) !impo
 .demo-box { margin-top: 26px; padding: 16px; border: 1px dashed var(--line-2); border-radius: 12px; background: var(--subtle); display: grid; gap: 6px; }
 .demo-box > span { font-size: 12.5px; color: var(--muted); }
 .demo-acc { display: grid; gap: 8px; margin-top: 6px; } .demo-acc .btn { height: auto; padding: 9px 12px; justify-content: space-between; white-space: normal; }
+
+/* notification bell (top right of every page header) */
+.bell { position: relative; color: var(--ink-2); }
+.bell .i { width: 17px; height: 17px; }
+.bell-n { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--bg); pointer-events: none; }
+.bell.ring .i { animation: ring .9s ease-in-out; transform-origin: 50% 10%; }
+@keyframes ring { 0%, 100% { transform: none; } 15% { transform: rotate(14deg); } 30% { transform: rotate(-12deg); } 45% { transform: rotate(8deg); } 60% { transform: rotate(-5deg); } 75% { transform: rotate(2deg); } }
+.bell-sep { width: 1px; height: 20px; background: var(--line); margin: 0 2px; }
+.popover.notifs { width: 360px; max-width: calc(100vw - 16px); }
+.popover.notifs .notif-list { max-height: min(420px, 70vh); overflow-y: auto; }
+.popover.notifs .empty.mini { padding: 28px 16px; }
+@media (max-width: 900px) { .ph [data-bell], .ph .bell-sep { display: none; } }

@@ -82,6 +82,7 @@ const ICONS = {
   tool: '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-8 8-3-3-6.5 0V11.5L3 10l7-7 1.5 1.5"/><path d="M14.7 6.3 18 3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  bell: '<path d="M6 10a6 6 0 1 1 12 0c0 4.5 1.6 6.2 2.4 7H3.6c.8-.8 2.4-2.5 2.4-7z"/><path d="M10 20.2a2.2 2.2 0 0 0 4 0"/>',
   inbox: '<path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
@@ -235,9 +236,9 @@ function popover(anchor, html, { cls = '', placement = 'below' } = {}) {
   $$('.popover').forEach((p) => p.remove());
   const p = document.createElement('div'); p.className = `popover ${cls}`; p.innerHTML = html; document.body.appendChild(p);
   const r = anchor.getBoundingClientRect(); const w = p.offsetWidth; const h = p.offsetHeight;
-  let left = placement === 'right' ? r.right + 8 : r.left; let top = placement === 'right' ? r.top : r.bottom + 6;
+  let left = placement === 'right' ? r.right + 8 : placement === 'below-end' ? r.right - w : r.left; let top = placement === 'right' ? r.top : r.bottom + 6;
   if (placement === 'above') top = r.top - h - 6;
-  left = Math.min(left, innerWidth - w - 8); top = Math.max(8, Math.min(top, innerHeight - h - 8));
+  left = Math.max(8, Math.min(left, innerWidth - w - 8)); top = Math.max(8, Math.min(top, innerHeight - h - 8));
   p.style.left = left + 'px'; p.style.top = top + 'px';
   setTimeout(() => { const off = (e) => { if (!p.contains(e.target)) { p.remove(); document.removeEventListener('mousedown', off); } }; document.addEventListener('mousedown', off); }, 0);
   return p;
