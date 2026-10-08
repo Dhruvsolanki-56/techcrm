@@ -157,10 +157,13 @@ function importModal(kind, after) {
    Link → the server fetches the sheet as .xlsx (it must be shared by link), or drop the downloaded .xlsx.
    Every tab is read here; the server recognises the known tabs, shows a preview, then imports. */
 const WB_SECTIONS = [['leads', 'Leads', 'Master Leads'], ['contact_log', 'Contact log entries', 'Contact Log'], ['clients', 'Clients', 'Clients'], ['projects', 'Projects', 'Projects'],
-  ['income', 'Money received', 'Income'], ['expenses', 'Expenses', 'Expenses'], ['grants', 'Grants', 'Grants'], ['subscriptions', 'Subscriptions → Renewals', 'Subscriptions']];
-const WB_MARKERS = /company\/?person|leadid|clientname|projectname|grantname|software\/?service|paymentmode|vendor/i;
+  ['income', 'Income', 'Income'], ['expenses', 'Expenses', 'Expenses'], ['grants', 'Grants', 'Grants'], ['subscriptions', 'Subscriptions', 'Subscriptions'],
+  ['grant_income', 'Grant money received', 'Grants'], ['documents', 'Documents', 'Documents'], ['assets', 'Assets', 'Assets'], ['bank_transactions', 'Bank Transactions', 'Bank Transactions']];
+// a tab is sent when its heading row looks like one of the sheets' tables (the calculated / dashboard tabs are left out)
+const WB_MARKERS = /company\/?person|leadid|clientname|projectname|grantname|software\/?service|paymentmode|vendor|documentname|assettype|withdrawal/i;
 function workbookModal(after) {
   let tabs = null, preview = null, fileName = '';
+  const accBody = (acc) => (acc === 'new' ? { new_account: ($('#wb-accname', m.el) || {}).value || 'Bank account' } : { account_id: acc || null });
   const accounts = App.lookups.accounts || [];
   const m = openModal({ title: 'Import a whole workbook', sub: 'Your “TechSentinals CRM” and “TechSentinals OS” Google Sheets, or any Excel file with the same tabs.', size: 'wide',
     body: `<div id="wb-1"><label class="f"><span>Google Sheet link</span><div class="row"><input id="wb-url" placeholder="https://docs.google.com/spreadsheets/d/…" inputmode="url" style="flex:1"><button class="btn" id="wb-fetch" type="button">Read sheet</button></div>
@@ -179,26 +182,27 @@ function workbookModal(after) {
       tabs[sh.name] = sh.rows.map((r) => { let n = r.length; while (n && !String(r[n - 1] ?? '').trim()) n--; return r.slice(0, n).map((c) => String(c ?? '').trim()); }).filter((r) => r.some(Boolean));
     }
     fileName = name;
-    if (!Object.keys(tabs).length) throw new Error('No known tabs in this workbook (looked for Master Leads, Contact Log, Clients, Projects, Income, Expenses, Grants, Subscriptions).');
+    if (!Object.keys(tabs).length) throw new Error('No known tabs in this workbook (looked for Master Leads, Contact Log, Clients, Projects, Income, Expenses, Grants, Subscriptions, Documents, Assets, Bank Transactions).');
     await runPreview();
   }
   async function runPreview() {
     showErr(''); go.disabled = true; go.textContent = 'Checking…';
-    const acc = $('#wb-acc', m.el) ? $('#wb-acc', m.el).value : (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id || '';
-    preview = await POST('/workbook/import', { tabs, dry_run: true, account_id: acc || null });
+    const acc = $('#wb-acc', m.el) ? $('#wb-acc', m.el).value : String((accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id || 'new');
+    preview = await POST('/workbook/import', { tabs, dry_run: true, ...accBody(acc) });
     drawPreview(acc);
   }
   function drawPreview(acc) {
     const sec = preview.sections; const total = Object.values(sec).reduce((n, x) => n + x.added, 0);
     const people = Object.entries(preview.people_not_found || {});
     const lists = Object.entries(preview.list_additions || {});
-    const needsAcc = (sec.income && sec.income.added) || (sec.expenses && sec.expenses.added);
+    const needsAcc = (sec.income && sec.income.added) || (sec.expenses && sec.expenses.added) || (sec.bank_transactions && sec.bank_transactions.added);
     $('#wb-1', m.el).classList.add('hidden'); step2.classList.remove('hidden');
     step2.innerHTML = `<div class="im-file"><span class="logo-sq sm" style="--a-bg:var(--accent-soft);--a-fg:var(--accent)">${icon('file')}</span><div class="grow"><b>${esc(fileName)}</b><div class="small muted">Tabs found: ${Object.keys(tabs).map(esc).join(', ')}</div></div><button class="btn sm" id="wb-again" type="button">Use another</button></div>
       <div class="tbl"><table class="t"><thead><tr><th>What</th><th class="num">In the sheet</th><th class="num">Will be added</th><th class="num">Already in CRM</th><th>Skipped</th></tr></thead><tbody>
       ${WB_SECTIONS.filter(([k]) => sec[k]).map(([k, label, tab]) => { const x = sec[k]; return `<tr><td><b>${label}</b><div class="t2">from “${tab}”</div></td><td class="num">${x.found}</td><td class="num"><b>${x.added}</b></td><td class="num">${x.already || '—'}</td><td class="small">${x.skipped.length ? `<details><summary>${x.skipped.length}</summary>${x.skipped.slice(0, 40).map((t) => `<div>${esc(t)}</div>`).join('')}</details>` : '—'}</td></tr>`; }).join('')}
       </tbody></table></div>
-      ${needsAcc ? `<label class="f" style="margin-top:14px;max-width:360px"><span>Money in and out goes through account</span><select id="wb-acc">${accounts.length ? accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(acc) ? 'selected' : ''}>${esc(a.name)}</option>`).join('') : '<option value="">— No account yet (add one in Finance first) —</option>'}</select><div class="hint">So the bank balance in Finance matches. Income from your own company is treated as founders' money, not client income.</div></label>` : ''}
+      ${needsAcc ? `<label class="f" style="margin-top:14px;max-width:360px"><span>Money in and out goes through account</span><select id="wb-acc">${accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(acc) ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="new" ${acc === 'new' ? 'selected' : ''}>+ Create a new bank account</option></select>
+        ${acc === 'new' ? '<input id="wb-accname" style="margin-top:8px" maxlength="60" value="Bank account" aria-label="Name of the new account">' : ''}<div class="hint">Money in and out is booked to this account, so Finance → Current Balance matches the sheet. Income from your own company counts as founders' money, not client income.</div></label>` : ''}
       ${people.length ? `<div class="callout warn" style="margin-top:14px"><b>Not matched to a team member:</b> ${people.map(([n, c]) => `${esc(n)} (${c})`).join(', ')}. Add them under Team &amp; access first (same first name is enough), then import, so their leads and subscriptions are assigned to them.</div>` : ''}
       ${lists.length ? `<div class="callout info" style="margin-top:12px">New dropdown values will be added: ${lists.map(([k, v]) => v.map(esc).join(', ')).join(', ')}.</div>` : ''}
       ${(preview.warnings || []).length ? `<details class="small" style="margin-top:12px"><summary>${plural(preview.warnings.length, 'note')} about individual rows</summary>${preview.warnings.slice(0, 80).map((w) => `<div class="muted">${esc(w)}</div>`).join('')}</details>` : ''}`;
@@ -219,7 +223,7 @@ function workbookModal(after) {
     go.disabled = true; go.textContent = 'Importing…'; go.classList.add('busy'); showErr('');
     try {
       const acc = $('#wb-acc', m.el) ? $('#wb-acc', m.el).value : null;
-      const r = await POST('/workbook/import', { tabs, account_id: acc || null });
+      const r = await POST('/workbook/import', { tabs, ...accBody(acc) });
       await refreshLookups();
       const parts = WB_SECTIONS.filter(([k]) => r.sections[k] && r.sections[k].added).map(([k, label]) => `<li><b>${r.sections[k].added}</b> ${label.toLowerCase()}</li>`).join('');
       step2.innerHTML = `<div class="im-done"><span class="im-tick">${icon('check')}</span><h3>Imported</h3><ul class="wb-done">${parts || '<li>Nothing new</li>'}</ul>

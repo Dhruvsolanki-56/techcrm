@@ -31,6 +31,16 @@ app.use(express.json({ limit: '4mb' }));
 // API: every state-changing request must carry our custom header (blocks cross-site form posts)
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
+  // big lists (all leads, expenses …) go out gzip-compressed: ~10x smaller over Wi-Fi / mobile data
+  if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    const json = res.json.bind(res);
+    res.json = (data) => {
+      const body = Buffer.from(JSON.stringify(data));
+      if (body.length < 8192 || res.headersSent) return json(data);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.setHeader('Content-Encoding', 'gzip'); res.setHeader('Vary', 'Accept-Encoding');
+      return res.end(require('zlib').gzipSync(body, { level: 6 }));
+    };
+  }
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers['x-requested-with'] !== 'crm') {
     return res.status(403).json({ error: 'Blocked: missing request header.' });
   }
@@ -44,7 +54,24 @@ if (DEMO) {
 app.use('/api/auth', auth);
 app.use('/api', requireUser, api, buildRouter());
 
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: 0, index: 'index.html' }));
+// screens: gzip once per file version (kept in memory), revalidated with ETag so an update shows up on the next load
+const zlib = require('zlib');
+const PUBLIC = path.join(__dirname, 'public'); const zipped = new Map();
+const TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.svg': 'image/svg+xml' };
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  const rel = req.path === '/' ? '/index.html' : req.path; const type = TYPES[path.extname(rel)];
+  if (!type || !/\bgzip\b/.test(req.headers['accept-encoding'] || '') || rel.includes('..')) return next();
+  const file = path.join(PUBLIC, rel); if (!file.startsWith(PUBLIC + path.sep)) return next();
+  let st; try { st = fs.statSync(file); } catch { return next(); } if (!st.isFile()) return next();
+  const tag = `W/"${st.size.toString(36)}-${st.mtimeMs.toString(36)}-gz"`;
+  res.setHeader('Vary', 'Accept-Encoding'); res.setHeader('Cache-Control', 'no-cache'); res.setHeader('ETag', tag);
+  if (req.headers['if-none-match'] === tag) return res.status(304).end();
+  let z = zipped.get(file); if (!z || z.tag !== tag) { z = { tag, body: zlib.gzipSync(fs.readFileSync(file), { level: 9 }) }; zipped.set(file, z); }
+  res.setHeader('Content-Type', type); res.setHeader('Content-Encoding', 'gzip'); res.setHeader('Content-Length', z.body.length);
+  return req.method === 'HEAD' ? res.end() : res.end(z.body);
+});
+app.use(express.static(PUBLIC, { maxAge: 0, index: 'index.html' }));
 app.get('*', (req, res) => (req.path.startsWith('/api') ? res.status(404).json({ error: 'Not found' }) : res.sendFile(path.join(__dirname, 'public', 'index.html'))));
 
 // eslint-disable-next-line no-unused-vars

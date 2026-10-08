@@ -156,12 +156,19 @@ async function moveLead(id, stage, after) {
 }
 
 // the same filters drive the board and the list: department / product, priority, market, owner, search
-const LEAD_FILTERS = [['department', 'Department / product', () => OPT.leadDept], ['priority', 'Priority', () => OPT.leadPriority], ['market', 'Market', () => OPT.market], ['owner_id', 'Assigned to', () => App.lookups.users.map((u) => [u.id, u.name])], ['source', 'Source', () => OPT.leadSource]];
+const LEAD_FILTERS = [['category', 'Category', () => OPT.leadCategory], ['priority', 'Priority', () => OPT.leadPriority], ['market', 'Market', () => OPT.market], ['owner_id', 'Assigned To', () => App.lookups.users.map((u) => [u.id, u.name])], ['source', 'Lead Source', () => OPT.leadSource], ['followup_status', 'Follow-Up Status', () => ['Overdue', 'Due Today', 'Scheduled', 'Not Scheduled', 'Completed']]];
+// the sheet's columns, in the sheet's order (used for the list and the CSV export)
+const MASTER_COLS = [['id', 'Lead ID'], ['created_at', 'Date Added', (l) => String(l.created_at || '').slice(0, 10)], ['company', 'Company / Person'], ['name', 'Contact Person', (l) => (l.name && l.name !== l.company ? l.name : '')],
+  ['phone', 'Phone / WhatsApp'], ['email', 'Email'], ['city', 'City'], ['country', 'Country'], ['market', 'Market'], ['business_side', 'Business Side'], ['department', 'Department / Product'], ['category', 'Category'],
+  ['requirement', 'Requirement / Interested In'], ['source', 'Lead Source'], ['owner_name', 'Assigned To'], ['priority', 'Priority', (l) => pretty(l.priority)], ['stage', 'Sales Stage', (l) => STATUS_LABEL[l.stage] || pretty(l.stage)],
+  ['followup_round', 'Follow-Up Round', (l) => ROUND_LABEL[l.followup_round] || ''], ['last_contact', 'Last Contact Date'], ['next_followup', 'Next Follow-Up Date'], ['followup_status', 'Follow-Up Status'], ['next_action', 'Next Action'],
+  ['meeting_date', 'Meeting / Demo Date'], ['proposal_date', 'Proposal Date'], ['value', 'Deal Value (INR)'], ['probability', 'Probability', (l) => (l.probability || 0) + '%'], ['weighted', 'Weighted Pipeline', (l) => Math.round((l.value || 0) * (l.probability || 0)) / 100],
+  ['closed_on', 'Conversion / Close Date'], ['lost_reason', 'Lost / Closed Reason'], ['notes', 'Notes']];
 
 route('/leads', async ({ el, query }) => {
   const view = localStorage.getItem('leadView') || 'board';
   const all = await GET('/leads');
-  const f = {}; for (const [k] of LEAD_FILTERS) if (query[k]) f[k] = query[k];
+  const f = {}; for (const k of ['department', ...LEAD_FILTERS.map(([x]) => x)]) if (query[k]) f[k] = query[k];
   const showClosed = query.closed === '1';
   const q = String(query.q || '').toLowerCase();
   const leads = all.filter((l) => Object.entries(f).every(([k, v]) => String(l[k] ?? '') === String(v)) && (!q || [l.name, l.company, l.phone, l.email, l.city, l.requirement, l.notes].join(' ').toLowerCase().includes(q)));
@@ -170,31 +177,47 @@ route('/leads', async ({ el, query }) => {
   const weighted = open.reduce((s, l) => s + (l.value || 0) * (STAGE_PROB[l.stage] || 0) / 100, 0);
   const due = open.filter((l) => l.next_followup && l.next_followup <= todayStr()).length;
   el.innerHTML = pageHead('Pipeline', '', `<div class="seg"><button class="${view === 'board' ? 'on' : ''}" data-v="board">Board</button><button class="${view === 'list' ? 'on' : ''}" data-v="list">List</button></div>
-    ${isFounder() ? `<button class="btn" id="implead">${icon('upload')}Import</button>` : ''}<button class="btn primary" id="addlead">${icon('plus')}New lead</button>`, '<b>Pipeline</b>')
+    <button class="btn" id="lexport" title="Download these leads with the same columns as Master Leads">${icon('download')}CSV</button>${isFounder() ? `<button class="btn" id="implead">${icon('upload')}Import</button>` : ''}<button class="btn primary" id="addlead">${icon('plus')}New lead</button>`, '<b>Pipeline</b>')
     + `<div class="pt"><div><h1>Pipeline</h1><div class="sub">${plural(open.length, 'open lead')} · pipeline <b style="color:var(--ink)">${money(open.reduce((s, l) => s + (l.value || 0), 0))}</b> · weighted ${money(weighted)} · ${leads.length ? Math.round(100 * won.length / leads.length) : 0}% converted · <a href="#/followups">${plural(due, 'follow-up')} due</a></div></div></div>
-    <div class="toolbar lead-tb"><input type="search" id="lq" placeholder="Search name, company, phone…" value="${esc(query.q || '')}" aria-label="Search leads">
+    <nav class="dept-tabs" aria-label="Department / Product">${[['', 'All leads', all.length], ...[...new Set([...normOpts(OPT.leadDept).map((o) => o.v), ...all.map((l) => l.department).filter(Boolean)])].map((d) => [d, d, all.filter((l) => l.department === d).length]).filter(([d, , n]) => n || d === f.department)]
+      .map(([d, label, n]) => `<a href="#" data-dept="${esc(d)}" class="${(f.department || '') === d ? 'on' : ''}">${esc(label)} <span>${n}</span></a>`).join('')}</nav>
+    <div class="toolbar lead-tb"><input type="search" id="lq" placeholder="Search company, person, phone…" value="${esc(query.q || '')}" aria-label="Search leads">
       ${LEAD_FILTERS.map(([k, label, opts]) => `<select data-lf="${k}" aria-label="${esc(label)}"><option value="">${esc(label)}</option>${normOpts(opts()).map((o) => `<option value="${esc(o.v)}" ${String(f[k]) === String(o.v) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`).join('')}
       ${view === 'board' ? `<label class="check" style="margin-left:auto"><input type="checkbox" id="lclosed" ${showClosed ? 'checked' : ''}><span>Show closed &amp; lost</span></label>` : ''}</div><div id="lead-body"></div>`;
-  const go = (extra = {}) => { const p = new URLSearchParams(); $$('[data-lf]', el).forEach((s) => s.value && p.set(s.dataset.lf, s.value)); const qv = $('#lq', el).value.trim(); if (qv) p.set('q', qv); if ($('#lclosed', el) && $('#lclosed', el).checked) p.set('closed', '1'); Object.entries(extra).forEach(([k, v]) => p.set(k, v)); location.hash = '#/leads' + (p.toString() ? '?' + p : ''); };
+  let dept = f.department || '';
+  const go = (extra = {}) => { const p = new URLSearchParams(); if (dept) p.set('department', dept); $$('[data-lf]', el).forEach((s) => s.value && p.set(s.dataset.lf, s.value)); const qv = $('#lq', el).value.trim(); if (qv) p.set('q', qv); if ($('#lclosed', el) && $('#lclosed', el).checked) p.set('closed', '1'); Object.entries(extra).forEach(([k, v]) => p.set(k, v)); location.hash = '#/leads' + (p.toString() ? '?' + p : ''); };
   $$('[data-lf]', el).forEach((s) => s.addEventListener('change', () => go()));
+  $$('[data-dept]', el).forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); dept = a.dataset.dept; go(); }));
+  const ex = $('#lexport', el); if (ex) ex.addEventListener('click', () => csvDownload(`master-leads-${todayStr()}.csv`, [MASTER_COLS.map((c) => c[1]), ...leads.map((l) => MASTER_COLS.map(([k, , fn]) => (fn ? fn(l) : l[k] ?? '')))]));
   $('#lq', el).addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
   $('#lq', el).addEventListener('search', () => go());
   if ($('#lclosed', el)) $('#lclosed', el).addEventListener('change', () => go());
   $$('[data-v]', el).forEach((b) => b.addEventListener('click', () => { localStorage.setItem('leadView', b.dataset.v); Router.refresh(); }));
-  $('#addlead', el).addEventListener('click', () => editRecord('leads', null, { owner_id: App.user.id, department: f.department || '' }, () => Router.refresh(), { label: 'lead', size: 'wide' }));
+  $('#addlead', el).addEventListener('click', () => editRecord('leads', null, { owner_id: App.user.id, department: f.department || '', category: f.category || '' }, () => Router.refresh(), { label: 'lead', size: 'wide' }));
   const il = $('#implead', el); if (il) il.addEventListener('click', () => importModal('leads', () => Router.refresh()));
   const body = $('#lead-body', el);
   if (view === 'list') {
     mountList(body, {
       resource: 'leads', rows: async () => leads, search: false, defaultSort: { key: 'created_at', dir: 'desc' }, noun: 'lead',
-      filters: [{ key: 'stage', label: 'Stage', options: OPT.leadStage }, { key: 'followup_round', label: 'Follow-up round', options: OPT.followRound }],
+      filters: [{ key: 'stage', label: 'Sales Stage', options: OPT.leadStage }, { key: 'followup_round', label: 'Follow-Up Round', options: OPT.followRound }],
       columns: [
-        { key: 'company', label: 'Lead', render: (r) => `<div class="who">${logoSq(r.company || r.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.company || r.name)}</div><div class="t2 ellipsis">${esc([r.company && r.company !== r.name ? r.name : '', r.phone].filter(Boolean).join(' · '))}</div></div></div>` },
-        { key: 'department', label: 'Dept / product', render: (r) => `${esc(r.department || '—')}<div class="t2">${esc(r.category || '')}</div>` },
-        { key: 'stage', label: 'Stage', render: (r) => badge(r.stage) }, { key: 'priority', label: 'Priority', sort: (r) => ({ hot: 0, medium: 1, cold: 2 })[r.priority], render: (r) => heat(r.priority) },
-        { key: 'value', label: 'Value', num: true, render: (r) => (r.value ? money(r.value) : '<span class="faint">—</span>') },
-        { key: 'next_followup', label: 'Follow-up', render: (r) => (CLOSED_STAGES.includes(r.stage) ? '<span class="faint">—</span>' : `${dueBadge(r.next_followup)}<div class="t2">${esc(ROUND_LABEL[r.followup_round] || '')}</div>`) },
-        { key: 'owner_name', label: 'Assigned', render: (r) => who(r.owner_name) }, { key: 'source', label: 'Source', render: (r) => `<span class="muted">${esc(r.source || '—')}</span>` },
+        { key: 'id', label: 'Lead ID', num: true, cls: 'opt', render: (r) => `<span class="muted tnum">${r.id}</span>` },
+        { key: 'created_at', label: 'Date Added', cls: 'opt nowrap', render: (r) => fshort(r.created_at) },
+        { key: 'company', label: 'Company / Person', render: (r) => `<div class="who">${logoSq(r.company || r.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.company || r.name)}</div><div class="t2 ellipsis">${esc([r.company && r.company !== r.name ? r.name : '', r.phone].filter(Boolean).join(' · '))}</div></div></div>` },
+        { key: 'market', label: 'Market', cls: 'opt', render: (r) => esc(r.market || '—') },
+        { key: 'department', label: 'Department / Product', render: (r) => `${esc(r.department || '—')}<div class="t2">${esc(r.business_side || '')}</div>` },
+        { key: 'category', label: 'Category', cls: 'opt', render: (r) => esc(r.category || '—') },
+        { key: 'source', label: 'Lead Source', cls: 'opt', render: (r) => `<span class="muted">${esc(r.source || '—')}</span>` },
+        { key: 'owner_name', label: 'Assigned To', render: (r) => (r.owner_id ? who(r.owner_name) : r.owner_name ? `<span class="muted" title="Not a team member yet">${esc(r.owner_name)}</span>` : '<span class="faint">—</span>') },
+        { key: 'priority', label: 'Priority', sort: (r) => ({ hot: 0, medium: 1, cold: 2 })[r.priority] ?? 3, render: (r) => heat(r.priority) || '<span class="faint">—</span>' },
+        { key: 'stage', label: 'Sales Stage', render: (r) => badge(r.stage) },
+        { key: 'followup_round', label: 'Follow-Up Round', cls: 'opt nowrap', render: (r) => esc(ROUND_LABEL[r.followup_round] || '—') },
+        { key: 'last_contact', label: 'Last Contact Date', cls: 'opt nowrap', render: (r) => (r.last_contact ? fshort(r.last_contact) : '<span class="faint">—</span>') },
+        { key: 'next_followup', label: 'Next Follow-Up Date', cls: 'nowrap', render: (r) => (CLOSED_STAGES.includes(r.stage) || !r.next_followup ? '<span class="faint">—</span>' : dueBadge(r.next_followup)) },
+        { key: 'followup_status', label: 'Follow-Up Status', cls: 'opt', render: (r) => fuStatus(r.followup_status) },
+        { key: 'value', label: 'Deal Value (INR)', num: true, render: (r) => (r.value ? money(r.value) : '<span class="faint">—</span>') },
+        { key: 'probability', label: 'Probability', num: true, cls: 'opt', render: (r) => `${r.probability || 0}%` },
+        { key: 'weighted', label: 'Weighted Pipeline', num: true, cls: 'opt', sort: (r) => (r.value || 0) * (r.probability || 0), render: (r) => (r.value ? money((r.value || 0) * (r.probability || 0) / 100) : '<span class="faint">—</span>') },
       ],
       onRow: (r) => (location.hash = '#/leads/' + r.id), empty: { title: all.length ? 'No leads match' : 'No leads yet', text: all.length ? 'Clear a filter to see more.' : 'Add the enquiries you are working on, or import your sheet from Settings.' },
     });
@@ -214,16 +237,16 @@ route('/leads/:id', async ({ el, params, query }) => {
   const closed = CLOSED_STAGES.includes(l.stage);
   const fu = l.next_followup ? (daysUntil(l.next_followup) < 0 ? `<span class="neg">${-daysUntil(l.next_followup)} days late</span>` : daysUntil(l.next_followup) === 0 ? 'Today' : `in ${daysUntil(l.next_followup)} days`) : 'Not scheduled';
   const wa = l.phone ? String(l.phone).replace(/\D/g, '') : '';
-  el.innerHTML = pageHead(esc(l.name), '', `${!closed ? `<button class="btn" id="logc">${icon('phone')}Log contact</button>` : ''}${f && !l.client_id && !['lost', 'closed'].includes(l.stage) ? `<button class="btn accent" id="convert">${icon('check')}Convert to client</button>` : ''}${f ? `<a class="btn" href="#/quotes/new?lead=${l.id}">New quotation</a>` : ''}<button class="btn" id="edit">${icon('edit')}Edit</button>`, `<a href="#/leads">Pipeline</a> / ${esc(l.company || l.name)}`)
+  el.innerHTML = pageHead(esc(l.company || l.name), '', `${!closed ? `<button class="btn" id="logc">${icon('phone')}Log contact</button>` : ''}${f && !l.client_id && !['lost', 'closed'].includes(l.stage) ? `<button class="btn accent" id="convert">${icon('check')}Convert to client</button>` : ''}${f ? `<a class="btn" href="#/quotes/new?lead=${l.id}">New quotation</a>` : ''}<button class="btn" id="edit">${icon('edit')}Edit</button>`, `<a href="#/leads">Pipeline</a> / ${esc(l.company || l.name)}`)
     + `<div class="record"><div class="record-main"><div class="rec-head">${logoSq(l.company || l.name)}<div><h1>${esc(l.company || l.name)}</h1><div class="meta">${badge(l.stage)}${heat(l.priority)}${l.company && l.company !== l.name ? `<span>${esc(l.name)}</span>` : ''}${l.department ? `<span>${esc(l.department)}${l.business_side ? ` · ${esc(l.business_side)}` : ''}</span>` : ''}${l.client_id ? `<a href="#/clients/${l.client_id}">Now a client →</a>` : ''}</div></div></div>
-      <div class="highlights">${hl('Deal value', l.value ? money(l.value) : '—', `${l.probability || 0}% likely · weighted ${money((l.value || 0) * (l.probability || 0) / 100)}`)}${hl('Next follow-up', l.next_followup && !closed ? fshort(l.next_followup) : '—', closed ? 'Deal ended' : fu, l.next_followup && !closed && daysUntil(l.next_followup) < 0 ? 'bad' : '')}
-        ${hl('Follow-up round', ROUND_LABEL[l.followup_round] || '—', l.last_contact ? `last contact ${fshort(l.last_contact)}` : 'no contact logged')}${hl(closed ? 'Closed on' : 'In pipeline', closed ? (l.closed_on ? fshort(l.closed_on) : '—') : plural(days, 'day'), closed ? '' : `since ${fshort(l.created_at)}`)}</div>
-      ${l.next_action && !closed ? `<div class="callout info next-act"><b>Next action:</b> ${esc(l.next_action)}</div>` : ''}
+      <div class="highlights">${hl('Deal Value (INR)', l.value ? money(l.value) : '—', `Probability ${l.probability || 0}% · Weighted Pipeline ${money((l.value || 0) * (l.probability || 0) / 100)}`)}${hl('Next Follow-Up Date', l.next_followup && !closed ? fshort(l.next_followup) : '—', closed ? 'Deal ended' : `${esc(l.followup_status || '')}${l.next_followup ? ' · ' + fu : ''}`, l.next_followup && !closed && daysUntil(l.next_followup) < 0 ? 'bad' : '')}
+        ${hl('Follow-Up Round', ROUND_LABEL[l.followup_round] || '—', l.last_contact ? `Last Contact Date ${fshort(l.last_contact)}` : 'no contact logged')}${hl(closed ? 'Conversion / Close Date' : 'Date Added', closed ? (l.closed_on ? fshort(l.closed_on) : '—') : fshort(l.created_at), closed ? '' : `${plural(days, 'day')} in the pipeline`)}</div>
+      ${l.next_action && !closed ? `<div class="callout info next-act"><b>Next Action:</b> ${esc(l.next_action)}</div>` : ''}
       ${tabsHtml(tabs, tab, '#/leads/' + l.id)}<div id="tab"></div></div>
-      <aside class="record-side">${propsSec('Deal', `${prop('Stage', `<select id="stg" aria-label="Sales stage">${OPT.leadStage.map(([v, n]) => `<option value="${v}" ${v === l.stage ? 'selected' : ''}>${n}</option>`).join('')}</select>`)}${prop('Priority', heat(l.priority))}${prop('Department / product', esc(l.department || ''))}${prop('Business side', esc(l.business_side || ''))}${prop('Category', esc(l.category || ''))}${prop('Source', esc(l.source || ''))}${prop('Assigned to', l.owner_name ? who(l.owner_name) : '')}
-          ${prop('Meeting / demo', l.meeting_date ? fdate(l.meeting_date) : '')}${prop('Proposal sent', l.proposal_date ? fdate(l.proposal_date) : '')}${l.lost_reason ? prop(l.stage === 'won' ? 'Note' : 'Lost / closed because', esc(l.lost_reason)) : ''}`)}
-        ${propsSec('Contact', `${prop('Name', esc(l.name))}${prop('Phone', l.phone ? `<a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${wa.length >= 10 ? ` · <a href="https://wa.me/${wa.length === 10 ? '91' + wa : wa}" target="_blank" rel="noopener noreferrer">WhatsApp</a>` : ''}` : '')}${prop('Email', l.email ? `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>` : '')}${prop('City', esc(l.city || ''))}${prop('Country', esc([l.country, l.market && l.market !== l.country ? l.market : ''].filter(Boolean).join(' · ')))}${prop('Website', l.website ? extLink(l.website) : '')}`)}
-        ${propsSec('Requirement', `<div class="doc-text pre">${l.requirement ? esc(l.requirement) : '<span class="faint">Nothing written yet.</span>'}</div>`)}
+      <aside class="record-side">${propsSec('Deal', `${prop('Lead ID', `<span class="tnum">${l.id}</span>`)}${prop('Sales Stage', `<select id="stg" aria-label="Sales Stage">${OPT.leadStage.map(([v, n]) => `<option value="${v}" ${v === l.stage ? 'selected' : ''}>${n}</option>`).join('')}</select>`)}${prop('Priority', heat(l.priority))}${prop('Department / Product', esc(l.department || ''))}${prop('Business Side', esc(l.business_side || ''))}${prop('Category', esc(l.category || ''))}${prop('Lead Source', esc(l.source || ''))}${prop('Assigned To', l.owner_id ? who(l.owner_name) : l.owner_name ? `${esc(l.owner_name)} <span class="faint small">(not a team member yet)</span>` : '')}${prop('Follow-Up Status', fuStatus(l.followup_status))}${prop('Probability', `${l.probability || 0}%`)}
+          ${prop('Meeting / Demo Date', l.meeting_date ? fdate(l.meeting_date) : '')}${prop('Proposal Date', l.proposal_date ? fdate(l.proposal_date) : '')}${l.lost_reason ? prop('Lost / Closed Reason', esc(l.lost_reason)) : ''}`)}
+        ${propsSec('Contact', `${l.name && l.name !== l.company ? prop('Contact Person', esc(l.name)) : ''}${prop('Phone / WhatsApp', l.phone ? `<a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${wa.length >= 10 ? ` · <a href="https://wa.me/${wa.length === 10 ? '91' + wa : wa}" target="_blank" rel="noopener noreferrer">WhatsApp</a>` : ''}` : '')}${prop('Email', l.email ? `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>` : '')}${prop('City', esc(l.city || ''))}${prop('Country', esc(l.country || ''))}${prop('Market', esc(l.market || ''))}${prop('Website', l.website ? extLink(l.website) : '')}`)}
+        ${propsSec('Requirement / Interested In', `<div class="doc-text pre">${l.requirement ? esc(l.requirement) : '<span class="faint">Nothing written yet.</span>'}</div>`)}
         ${l.notes ? propsSec('Notes', `<div class="doc-text pre">${esc(l.notes)}</div>`) : ''}</aside></div>`;
   const t = $('#tab', el);
   $('#edit', el).addEventListener('click', () => editRecord('leads', l, null, () => Router.refresh(), { label: 'lead', size: 'wide', afterDelete: () => (location.hash = '#/leads') }));
@@ -251,10 +274,10 @@ route('/clients', ({ el }) => {
   mountList($('#body', el), {
     resource: 'clients', searchPlaceholder: 'Search clients…', noun: 'client', filters: [{ key: 'status', label: 'Status', options: OPT.clientStatus }, { key: 'account_manager_id', label: 'Manager', lookup: 'users' }],
     columns: [
-      { key: 'company', label: 'Company', render: (r) => `<div class="who">${logoSq(r.company, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.company)}</div><div class="t2 ellipsis">${esc([r.industry, r.city].filter(Boolean).join(' · '))}</div></div></div>` },
-      { key: 'contact_name', label: 'Main contact', render: (r) => (r.contact_name ? `<div class="t1" style="font-weight:450">${esc(r.contact_name)}</div><div class="t2">${esc(r.contact_phone || r.contact_email || '')}</div>` : '<span class="faint">—</span>') },
+      { key: 'company', label: 'Client Name', render: (r) => `<div class="who">${logoSq(r.company, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.company)}</div><div class="t2 ellipsis">${esc([r.industry, r.city].filter(Boolean).join(' · '))}</div></div></div>` },
+      { key: 'contact_name', label: 'Contact Person', render: (r) => (r.contact_name ? `<div class="t1" style="font-weight:450">${esc(r.contact_name)}</div><div class="t2">${esc(r.contact_phone || r.contact_email || '')}</div>` : '<span class="faint">—</span>') },
       { key: 'status', label: 'Status', render: (r) => badge(r.status) }, { key: 'project_count', label: 'Projects', num: true },
-      ...(isFounder() ? [{ key: 'lifetime_received', label: 'Received', num: true, render: (r) => (r.lifetime_received ? money(r.lifetime_received) : '<span class="faint">—</span>') }, { key: 'outstanding', label: 'Outstanding', num: true, render: (r) => (r.outstanding > 0 ? `<span class="neg">${money(r.outstanding)}</span>` : '<span class="faint">—</span>') }] : []),
+      ...(isFounder() ? [{ key: 'total_billed', label: 'Total Billed', num: true, render: (r) => (r.total_billed ? money(r.total_billed) : '<span class="faint">—</span>') }, { key: 'lifetime_received', label: 'Received', num: true, cls: 'opt', render: (r) => (r.lifetime_received ? money(r.lifetime_received) : '<span class="faint">—</span>') }, { key: 'outstanding', label: 'Outstanding', num: true, render: (r) => (r.outstanding > 0 ? `<span class="neg">${money(r.outstanding)}</span>` : '<span class="faint">—</span>') }] : []),
       { key: 'manager_name', label: 'Manager', render: (r) => who(r.manager_name) },
     ],
     onRow: (r) => (location.hash = '#/clients/' + r.id), empty: { title: 'No clients yet', text: 'Convert a won lead, or add a client.' },
@@ -302,12 +325,15 @@ function projectsTable(root, query, { addDefaults } = {}) {
     resource: 'projects', query, searchPlaceholder: 'Search projects…', noun: 'project', compact: !!query.client_id,
     filters: query.client_id ? [] : [{ key: 'status', label: 'Status', options: OPT.projectStatus }, { key: 'client_id', label: 'Client', lookup: 'clients' }, { key: 'manager_id', label: 'Manager', lookup: 'users' }],
     columns: [
-      { key: 'name', label: 'Project', render: (r) => `<div class="who">${logoSq(r.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.name)}</div><div class="t2 ellipsis">${esc([r.code, query.client_id ? r.type : r.client_name].filter(Boolean).join(' · '))}</div></div></div>` },
+      { key: 'name', label: 'Project Name', render: (r) => `<div class="who">${logoSq(r.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.name)}</div><div class="t2 ellipsis">${esc([r.code, query.client_id ? r.type : r.client_name].filter(Boolean).join(' · '))}</div></div></div>` },
       { key: 'status', label: 'Status', render: (r) => badge(r.status) }, { key: 'priority', label: 'Priority', render: (r) => prio(r.priority) },
       { key: 'task_count', label: 'Progress', sort: pct, render: (r) => (r.task_count ? `<div class="prog"><div class="bar"><i style="width:${pct(r)}%"></i></div>${pct(r)}%</div>` : '<span class="faint small">No tasks</span>') },
-      { key: 'deadline', label: 'Deadline', render: (r) => (['completed', 'cancelled'].includes(r.status) ? `<span class="muted">${fshort(r.completed_on || r.deadline)}</span>` : ['maintenance', 'on_hold'].includes(r.status) ? '<span class="faint">—</span>' : dueBadge(r.deadline)) },
-      { key: 'manager_name', label: 'Lead', render: (r) => who(r.manager_name) },
-      ...(isFounder() ? [{ key: 'budget', label: 'Value', num: true, render: (r) => (r.budget ? money(r.budget) : '<span class="faint">—</span>') }] : []),
+      { key: 'deadline', label: 'End Date', render: (r) => (['completed', 'cancelled'].includes(r.status) ? `<span class="muted">${fshort(r.completed_on || r.deadline)}</span>` : ['maintenance', 'on_hold'].includes(r.status) ? '<span class="faint">—</span>' : dueBadge(r.deadline)) },
+      { key: 'manager_display', label: 'Project Manager', render: (r) => (r.manager_id ? who(r.manager_display) : r.manager_display ? `<span class="muted">${esc(r.manager_display)}</span>` : '<span class="faint">—</span>') },
+      ...(isFounder() ? [{ key: 'budget', label: 'Budget', num: true, cls: 'opt', render: (r) => (r.budget ? money(r.budget) : '<span class="faint">—</span>') },
+        { key: 'total_billed', label: 'Total Billed', num: true, render: (r) => (r.total_billed ? money(r.total_billed) : '<span class="faint">—</span>') },
+        { key: 'total_expenses', label: 'Total Expenses', num: true, cls: 'opt', render: (r) => (r.total_expenses ? money(r.total_expenses) : '<span class="faint">—</span>') },
+        { key: 'profit', label: 'Profitability', num: true, cls: 'opt', sort: (r) => (r.total_billed || 0) - (r.total_expenses || 0), render: (r) => (r.total_billed || r.total_expenses ? `<span class="${(r.total_billed || 0) - (r.total_expenses || 0) < 0 ? 'neg' : ''}">${money((r.total_billed || 0) - (r.total_expenses || 0))}</span>` : '<span class="faint">—</span>') }] : []),
     ],
     add: isFounder() ? { label: 'New project', onClick: (reload) => editRecord('projects', null, { manager_id: App.user.id, ...addDefaults }, (p) => { if (p) location.hash = '#/projects/' + p.id; else reload(); }, { label: 'project' }) } : null,
     onRow: (r) => (location.hash = '#/projects/' + r.id), empty: { title: 'No projects', text: isFounder() ? 'Create a project to keep its tasks, files, logins and money together.' : 'You have not been added to any project yet.' },

@@ -74,6 +74,8 @@
   const acc = accounts[0];
   const rest = [
     ['tasks', { title: T + ' task: build contact form', project_id: project.id, status: 'todo', priority: 'urgent', due_date: plus(2), description: 'Use the new API' }, (r) => r.title === T + ' task: build contact form'],
+    ['assets', { asset_type: ov1(OPT.assetType), make_model: T + ' Book', serial_number: 'ZZ-SN-1', purchase_date: today, purchase_value: 50000, current_value: 45000, status: 'Active', notes: 'Test asset' }, (r) => r.make_model === T + ' Book'],
+    ['bank_transactions', { date: today, description: T + ' NEFT', reference: 'ZZREF1', withdrawal: 1234, type: 'NEFT', matched_status: 'Unmatched', match_note: 'test' }, (r) => r.description === T + ' NEFT'],
     ['grants', { name: T + ' grant', funder: 'ZZ Council', applied_on: today, requested: 200000, received: 50000, status: 'disbursed', next_report_date: plus(30), notes: 'Tranche one' }, (r) => r.name === T + ' grant'],
     ['payments', { amount: 50000, date: today, client_id: client.id, category: 'Client payment', tds: 1000, project_id: project.id, account_id: acc.id, method: ov1(OPT.payMethod), reference: 'UTR123456', notes: 'Advance' }, (r) => r.reference === 'UTR123456'],
     ['expenses', { amount: 11800, date: today, category: ov1(OPT.expenseCategory), vendor: 'Hosting Co', description: T + ' server', status: 'paid', tax_amount: 1800, account_id: acc.id, method: ov1(OPT.payMethod), reference: 'BILL-77', project_id: project.id, client_id: client.id, receipt_url: 'https://zzbill.example.com/77', notes: 'Yearly' }, (r) => r.description === T + ' server'],
@@ -170,10 +172,10 @@
     f.querySelector('[name=bank_ifsc]').value = old || 'HDFC0001234'; f.querySelector('[type=submit]').click(); await sleep(800); ok(!f.querySelector('.invalid'), 'settings: saves when fixed'); }
 
   // ---------- 4. every page still renders with the new data ----------
-  for (const p of ['#/dashboard', '#/finance', '#/calendar', '#/followups', '#/sales-report', '#/grants', '#/leads?view=list&priority=hot', '#/renewals', '#/maintenance', '#/projects/' + project.id, '#/clients/' + client.id + '?tab=billing']) { location.hash = p; await sleep(1100); ok(!/Something went wrong|did not load/.test(document.querySelector('#view').innerText), `${p} renders with the test data`); }
+  for (const p of ['#/dashboard', '#/finance', '#/calendar', '#/followups', '#/sales-report', '#/contact-log', '#/grants', '#/assets', '#/finance?tab=bank', '#/leads?view=list&priority=hot', '#/renewals', '#/maintenance', '#/projects/' + project.id, '#/clients/' + client.id + '?tab=billing']) { location.hash = p; await sleep(1100); ok(!/Something went wrong|did not load/.test(document.querySelector('#view').innerText), `${p} renders with the test data`); }
 
   // ---------- 5. clean up ----------
-  const order = ['payments', 'invoices', 'quotes', 'documents', 'events', 'maintenance_logs', 'renewals', 'transfers', 'expenses', 'grants', 'tasks', 'contacts', 'leads', 'projects', 'accounts', 'clients'];
+  const order = ['payments', 'invoices', 'quotes', 'documents', 'events', 'maintenance_logs', 'renewals', 'transfers', 'bank_transactions', 'expenses', 'grants', 'assets', 'tasks', 'contacts', 'leads', 'projects', 'accounts', 'clients'];
   for (const res of order) for (const [r, id] of created.filter(([r]) => r === res)) { try { await DEL(`/${r}/${id}`); } catch (e) { log.push(`cleanup ${r} ${id}: ${e.message}`); } }
   for (const l of (await GET('/leads')).filter((x) => x.email === 'rahul@zzlead.example.com')) { try { await DEL('/leads/' + l.id); } catch { /* */ } }
   await refreshLookups(); location.hash = '#/dashboard';

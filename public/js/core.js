@@ -48,18 +48,23 @@ const dueBadge = (d, done) => {
 };
 
 const STATUS_TONE = {
-  green: ['active', 'won', 'paid', 'done', 'completed', 'accepted', 'resolved', 'approved', 'disbursed'],
-  red: ['overdue', 'lost', 'rejected', 'cancelled', 'lapsed', 'ended', 'failed'],
-  amber: ['pending', 'partial', 'review', 'on_hold', 'expired', 'paused', 'nurture'],
+  green: ['active', 'won', 'paid', 'done', 'completed', 'accepted', 'resolved', 'approved', 'disbursed', 'past'],
+  red: ['overdue', 'lost', 'rejected', 'cancelled', 'lapsed', 'ended', 'failed', 'at_risk', 'archived'],
+  amber: ['pending', 'partial', 'review', 'on_hold', 'expired', 'paused', 'nurture', 'planning', 'prospect'],
   blue: ['sent', 'in_progress', 'contacted', 'meeting', 'open', 'qualified', 'applied'],
   plum: ['maintenance', 'negotiation', 'proforma'],
   accent: ['proposal'],
 };
-const STATUS_LABEL = { won: 'Converted', qualified: 'Qualified', nurture: 'Nurture', closed: 'Closed', active: 'Active', in_progress: 'In progress', on_hold: 'On hold', todo: 'To do', review: 'In review', meeting: 'Demo / Meeting', proposal: 'Proposal sent', partial: 'Part-paid' };
+const STATUS_LABEL = { won: 'Converted', qualified: 'Qualified', nurture: 'Nurture', closed: 'Closed', active: 'Active', in_progress: 'In progress', on_hold: 'On Hold', at_risk: 'At Risk', todo: 'To do', review: 'In Review', meeting: 'Demo/Meeting', proposal: 'Proposal Sent', partial: 'Part-paid',
+  planning: 'Pending', prospect: 'Pending', past: 'Completed', archived: 'Cancelled' };
+// a generic status written as text (sheet statuses: Active, Completed, On Hold …) → same badge colours
+const textStatus = (v) => (v ? badge(String(v).toLowerCase().replace(/\s+/g, '_'), v) : '<span class="faint">—</span>');
 const PRIORITY = { low: 1, medium: 2, high: 3, urgent: 4 };
 // lead heat: Hot / Medium / Cold
 const heat = (p) => (p ? `<span class="heat h-${esc(p)}">${esc(pretty(p))}</span>` : '');
-const ROUND_LABEL = { not_started: 'Not started', initial: 'Initial contact', first: '1st follow-up', second: '2nd follow-up', third: '3rd follow-up', complete: 'Follow-up complete' };
+const ROUND_LABEL = { not_started: 'Not Started', initial: 'Initial Contact', first: '1st Follow-Up', second: '2nd Follow-Up', third: '3rd Follow-Up', complete: 'Follow-Up Complete' };
+const FU_TONE = { Overdue: 'red', 'Due Today': 'amber', Scheduled: 'blue', Completed: 'green', 'Not Scheduled': '' };
+const fuStatus = (v) => (v ? `<span class="st ${FU_TONE[v] || ''}">${esc(v)}</span>` : '');
 function prio(p) { const n = PRIORITY[p] || 0; return `<span class="nowrap"><span class="pri p${n}"><i></i><i></i><i></i></span>${esc(pretty(p))}</span>`; }
 function badge(v, label) {
   if (v == null || v === '') return '<span class="faint">—</span>';
@@ -105,6 +110,7 @@ const ICONS = {
   alert: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5M12 16v.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5M5 12h11"/>',
+  box: '<path d="M12 3 4 7v10l8 4 8-4V7z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
   shield: '<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8.3 7.5 9.5 4.3-1.2 7.5-5 7.5-9.5V6z"/><path d="m9 12 2 2 4-4"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   eye: '<path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"/><circle cx="12" cy="12" r="3"/>',
@@ -438,7 +444,7 @@ function mountList(root, cfg) {
       return;
     }
     const shown = rows.slice(0, st.limit);
-    tbl.removeAttribute('aria-busy'); tbl.innerHTML = `<div class="tbl-scroll"><table class="t"><thead><tr>${cfg.columns.map((c) => `<th class="${c.num ? 'num' : ''} ${c.sortable === false ? '' : 'sortable'}" data-sort="${c.key}" ${c.width ? `style="width:${c.width}"` : ''}>${esc(c.label)}${st.sort && st.sort.key === c.key ? `<span class="arr">${st.sort.dir === 'asc' ? '↑' : '↓'}</span>` : ''}</th>`).join('')}</tr></thead>
+    tbl.removeAttribute('aria-busy'); tbl.innerHTML = `<div class="tbl-scroll"><table class="t"><thead><tr>${cfg.columns.map((c) => `<th class="${c.num ? 'num' : ''} ${c.cls || ''} ${c.sortable === false ? '' : 'sortable'}" data-sort="${c.key}" ${c.width ? `style="width:${c.width}"` : ''}>${esc(c.label)}${st.sort && st.sort.key === c.key ? `<span class="arr">${st.sort.dir === 'asc' ? '↑' : '↓'}</span>` : ''}</th>`).join('')}</tr></thead>
       <tbody>${shown.map((r) => `<tr class="${cfg.onRow ? 'click' : ''}" data-id="${r.id}">${cfg.columns.map((c) => `<td class="${c.num ? 'num' : ''} ${c.cls || ''}">${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody>
       ${cfg.footer ? `<tfoot>${cfg.footer(rows)}</tfoot>` : ''}</table></div>
       ${cfg.compact && rows.length <= st.limit ? '' : `<div class="tbl-foot"><span>${plural(rows.length, cfg.noun || 'record')}${rows.length !== st.rows.length ? ` <span class="faint">of ${st.rows.length}</span>` : ''}</span>${rows.length > shown.length ? `<button class="btn sm" id="${id}-more">Show ${Math.min(100, rows.length - shown.length)} more</button>` : ''}</div>`}`;
@@ -469,7 +475,7 @@ const NOTE_ICON = { note: 'note', call: 'phone', meeting: 'meeting', email: 'mai
 const NOTE_VERB = { note: 'added a note', call: 'logged a call', meeting: 'logged a meeting', email: 'logged an email', whatsapp: 'logged a WhatsApp chat', visit: 'logged a visit', demo: 'gave a demo', proposal: 'sent a proposal', system: '' };
 function notesPanel(root, type, id, { canWrite = true, kinds = true, placeholder } = {}) {
   root.innerHTML = `${canWrite ? `<div class="composer"><textarea id="nt-body" rows="2" placeholder="${esc(placeholder || 'Write a note, call summary, decision or WhatsApp gist…')}"></textarea>
-    <div class="bar2">${kinds ? '<select id="nt-kind" aria-label="Type"><option value="note">Note</option><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="demo">Demo</option><option value="proposal">Proposal</option><option value="visit">Visit</option></select>' : ''}<span class="grow faint small">Ctrl + Enter to post</span><button class="btn primary sm" id="nt-add">Post</button></div></div>` : ''}
+    <div class="bar2">${kinds ? '<select id="nt-kind" aria-label="Type"><option value="note">Note</option><option value="call">Call</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option><option value="meeting">Meeting</option><option value="demo">Demo</option><option value="proposal">Proposal</option><option value="visit">Visit</option></select>' : ''}<span class="grow faint small">Ctrl + Enter to post</span><button class="btn primary sm" id="nt-add">Post</button></div></div>` : ''}
     <div class="tl" id="nt-list" aria-busy="true">${skRows(3)}</div>`;
   const list = $('#nt-list', root);
   async function load() {
@@ -540,10 +546,11 @@ function uploadModal(entityType, entityId, after, defaults = {}) {
 const INLINE_MIME = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'];
 const fileKind = (r) => { const ext = (r.filename.split('.').pop() || '').toUpperCase().slice(0, 4); return `<span class="logo-sq sm" style="--a-bg:#f1f0ec;--a-fg:#5b574e;font-size:9px">${esc(ext || 'FILE')}</span>`; };
 const docColumns = (showEntity) => [
-  { key: 'title', label: 'Document', render: (r) => `<div class="who">${r.url ? `<span class="fk" style="--fk:var(--blue)">${icon('link')}</span>` : fileKind(r)}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.title)}</div><div class="t2 ellipsis">${r.url ? esc(r.url.replace(/^https?:\/\//, '').slice(0, 60)) : `${esc(r.filename)} · ${fsize(r.size)}`}${r.expiry_date ? ` · expires ${dueBadge(r.expiry_date)}` : ''}</div></div></div>` },
+  { key: 'title', label: 'Document Name', render: (r) => `<div class="who">${r.url ? `<span class="fk" style="--fk:var(--blue)">${icon('link')}</span>` : fileKind(r)}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.title)}</div><div class="t2 ellipsis">${r.url ? esc(r.url.replace(/^https?:\/\//, '').slice(0, 60)) : `${esc(r.filename)} · ${fsize(r.size)}`}${r.expiry_date ? ` · expires ${dueBadge(r.expiry_date)}` : ''}</div></div></div>` },
   { key: 'category', label: 'Category', render: (r) => `<span class="tag">${esc(r.category || 'Other')}</span>` },
   ...(showEntity ? [{ key: 'entity_name', label: 'Linked to', render: (r) => (r.entity_type === 'general' ? '<span class="muted">Company</span>' : `<span class="muted">${pretty(r.entity_type)}</span> ${esc(r.entity_name || '—')}`) }] : []),
-  { key: 'created_at', label: 'Added', render: (r) => `${fshort(r.created_at)}<div class="t2">${esc(r.uploader_name || '')}</div>` },
+  ...(isFounder() ? [{ key: 'status', label: 'Status', cls: 'opt', render: (r) => (r.status ? textStatus(r.status) : '<span class="faint">—</span>') }, { key: 'owner_name', label: 'Owner', cls: 'opt', render: (r) => (r.owner_name ? esc(r.owner_name) : '<span class="faint">—</span>') }] : []),
+  { key: 'created_at', label: 'Upload Date', cls: 'nowrap', render: (r) => `${fshort(r.created_at)}<div class="t2">${esc(r.uploader_name || '')}</div>` },
   { key: 'a', label: '', sortable: false, cls: 'nowrap right', render: (r) => `${r.url ? `<a class="btn sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${icon('arrowUpRight')}Open</a> ` : `${INLINE_MIME.includes(r.mime) ? `<a class="btn sm" href="/api/files/${r.id}?inline=1" target="_blank" rel="noopener">${icon('eye')}View</a> ` : ''}<a class="btn sm icon" href="/api/files/${r.id}" title="Download">${icon('download')}</a> `}<button class="btn sm icon ghost" data-act="edit" title="Edit">${icon('edit')}</button>` },
 ];
 function docsPanel(root, entityType, entityId, { canUpload = true } = {}) {
@@ -571,7 +578,8 @@ const propsSec = (title, body, action) => `<section class="props-sec"><div class
 const panel = (title, body, right) => `<section class="panel"><div class="panel-h"><h2>${title}</h2>${right || ''}</div>${body}</section>`;
 const sectionH = (title, right) => `<div class="section-h"><h2>${title}</h2>${right || ''}</div>`;
 function csvDownload(filename, rows) {
-  const esc2 = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  // a cell starting with = + @ (or - not followed by a digit) would run as a formula in Excel → prefix it with '
+  const esc2 = (v) => { let s = v == null ? '' : String(v); if (/^[=+@\t\r]|^-(?!\d)/.test(s)) s = "'" + s; return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const blob = new Blob(['﻿' + rows.map((r) => r.map(esc2).join(',')).join('\r\n')], { type: 'text/csv' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }

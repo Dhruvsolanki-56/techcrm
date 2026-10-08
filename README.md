@@ -11,12 +11,21 @@ Want to look around first? Double-click **`start-demo.bat`** — separate sample
 Needs Node.js 20+. Manual: `npm install`, then `npm start`.
 
 ## Moving your Google Sheets / Excel in
-**Whole workbook (recommended):** *Settings → Move from Google Sheets / Excel → Import a whole workbook*. Paste the Google Sheet link (it must be shared as *Anyone with the link can view* for this step) or drop the file from *File → Download → Microsoft Excel*. It reads the tabs it knows — **Master Leads, Contact Log** (sales sheet) and **Clients, Projects, Income, Expenses, Grants, Subscriptions** (money sheet) — and shows a preview first: how many rows will be added, what is already in the CRM, and which people it could not match. Nothing is saved until you press *Import*. Running it again only adds new rows.
-1. Add your team first under *Team & access* (first name is enough for matching), so leads and subscriptions land on the right person.
-2. Import the sales sheet, then the money sheet (pick the bank account money moved through).
+**Whole workbook (recommended):** *Settings → Move from Google Sheets / Excel → Import a whole workbook*. Paste the Google Sheet link (it must be shared as *Anyone with the link can view* for this step) or drop the file from *File → Download → Microsoft Excel*. It reads every tab that holds data — **Master Leads, Contact Log, Lists & Settings, Dept Analytics** (sales sheet) and **Income, Expenses, Clients, Projects, Subscriptions, Grants, Documents, Assets, Bank Transactions, Settings** (money sheet). The other tabs (Dashboard, Follow Ups, the per-department tabs, Monthly / Dept / Source Analytics) are calculated from those, and the CRM calculates them itself: *Follow-ups*, *Pipeline* department tabs, *Sales report*, *Finance → Overview*. It shows a preview first: how many rows will be added, what is already in the CRM, and which people are not team members yet. Nothing is saved until you press *Import*. Running it again only adds new rows.
+1. Import the sales sheet, then the money sheet (pick the bank account the money moved through, or let it create one).
+2. Add your team under *Team & access*. People named in the sheet who are not team members yet are remembered: their leads, subscriptions, projects and assets are handed to them automatically the moment you add them (full name, or a first name only one person has).
 3. Afterwards set both Google Sheets back to **Restricted** — they hold customers' phone numbers and emails.
 
-Cells with several phone numbers keep the first as the phone and the rest in the lead's notes; invalid emails/phones are kept in notes, not lost. New departments, categories and sources from the sheet are added to the dropdowns (*Settings → Sales lists*).
+**Same names as the sheets:** every field, column and dropdown uses the sheet's wording (Company / Person, Phone / WhatsApp, Sales Stage, Follow-Up Round, Next Follow-Up Date, Deal Value (INR), Weighted Pipeline, Payment Mode, Receipt Link, Amount Requested …), and the lists in *Settings → Lists & Settings* are taken from the sheets' own list tabs. Lead IDs stay the same numbers as in the sheet. Grant money that the sheet shows only under *Grants → Amount Received* is booked as Grant income so *Current Balance* and *Total Revenue* match the sheet's Dashboard (its date is a placeholder — set the real one in *Finance → Income*).
+
+Cells with several phone numbers keep the first as the phone and the rest in the lead's notes; invalid emails/phones are kept in notes, not lost. Two sheet rows with the same phone are both kept (as in the sheet) with a note.
+
+**From the command line (this computer only, nothing goes online):** stop the CRM, then
+```
+node scripts/import-sheets.js "<sales sheet link or .xlsx>" "<money sheet link or .xlsx>" --dry-run
+node scripts/import-sheets.js "<sales sheet link or .xlsx>" "<money sheet link or .xlsx>" --account "Bank account"
+```
+`--dry-run` only shows what would happen. A copy of the database is saved in `data/backups` before anything is written.
 
 **Single list:** **Pipeline → Import** (leads) or **Clients → Import** (also under *Settings → Move from Excel*). Drop an `.xlsx` or `.csv` file whose first row is the column headings. The CRM guesses which column is which (Name, Mobile, Budget, Remarks…), you check the matching, then press *Import*. Rows already in the CRM (same email/phone/name for leads, same company for clients) are skipped, so running it twice is safe. Dates like 05/11/2026 are read as day/month. Old `.xls` files: save as `.xlsx` first. Founders only.
 
@@ -46,6 +55,9 @@ New accounts get a temporary password and can do nothing until they choose their
 - **Pipeline** – board or list with the same fields as the sales sheet: department/product (Service or Product is worked out from it), category, market (India / Foreign), **priority (Hot / Medium / Cold)**, follow-up round (Initial → 3rd → Complete), next action, last contact, meeting/proposal/close dates, win probability by stage. Filter by department, priority, market, owner, source. *Convert to client (+ project)*.
 - **Follow-ups** – the morning call list: overdue, today, next 7 days, later, no date; *Mine / Everyone*; call and WhatsApp buttons; **Log contact** records the call/WhatsApp/visit, its outcome, moves the stage and round, and sets the next follow-up in one popup.
 - **Sales report** – funnel by stage, India vs Foreign, Service vs Product, 12-month added/converted/lost, and tables by department, source, person and category (conversion, hot, overdue, pipeline, weighted value). CSV export.
+- **Contact Log** – every call, WhatsApp, email, meeting, demo, proposal and visit across all leads, with Follow-Up Round and Next Follow-Up Date; CSV export.
+- **Assets** (founders) – laptops, phones and devices: Asset Type, Make/Model, Serial Number, Purchase / Current Value, Assigned To, Status.
+- **Bank Transactions** (*Finance*) – statement lines (Withdrawal / Deposit / Balance) with **Auto-match** to income and expenses of the same amount within 5 days.
 - **Grants** (founders) – requested, received, still to come, how much is spent (expenses tagged with the grant) and the next reporting date (also on the calendar).
 - **Clients** – details, GSTIN, contacts, projects, invoices & payments, files, credentials, support log, timeline.
 - **Projects** – scope/specs, links, team, task board, files, credentials, project profit.

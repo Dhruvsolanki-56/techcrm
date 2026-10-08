@@ -104,6 +104,12 @@ async function run() {
   const grant = (await call('POST', '/grants', { name: 'State startup seed grant', funder: 'Demo Innovation Council', applied_on: ago(150), requested: 250000, received: 100000, status: 'disbursed', next_report_date: inn(20), notes: 'Second tranche after the progress report.' })).id;
   await call('POST', '/payments', { date: ago(90), amount: 100000, account_id: bank, method: 'Bank transfer / NEFT / RTGS', category: 'Grant', grant_id: grant, reference: 'GRANT-T1' });
   await call('POST', '/expenses', { category: 'Software & tools', vendor: 'Cloud hosting', amount: 18000, date: ago(60), account_id: bank, status: 'paid', description: 'Prototype hosting for a year', grant_id: grant, receipt_url: 'https://example.com/receipt/123' });
+  // money sheet tabs: an asset and two bank statement lines (one matches the grant expense above)
+  await call('POST', '/assets', { asset_type: 'Laptop', make_model: 'Demo Book 14', serial_number: 'DB14-0001', purchase_date: ago(200), purchase_value: 72000, current_value: 52000, assigned_to: u.kabir, status: 'Active' });
+  await call('POST', '/assets', { asset_type: 'Phone', make_model: 'Demo Phone 8', purchase_date: ago(90), purchase_value: 18000, status: 'Active' });
+  await call('POST', '/bank_transactions', { date: ago(59), description: 'CARD PURCHASE CLOUD HOSTING', reference: 'TXN-4471', withdrawal: 18000, type: 'Card', account_id: bank });
+  await call('POST', '/bank_transactions', { date: ago(3), description: 'SMS ALERT CHARGES', withdrawal: 17.7, type: 'Charges', account_id: bank });
+  await call('POST', '/bank-match', {});
   await call('POST', '/documents/link', { title: 'Company registration (shared drive)', category: 'Legal', entity_type: 'general', url: 'https://example.com/docs/registration', expiry_date: inn(45) });
   for (const [client, project, kind, name, vendor, date, cycle, cost, price] of [[clients.bright, proj.bright, 'domain', 'brightpath.example', 'GoDaddy', inn(9), 'yearly', 900, 1500], [clients.green, proj.green, 'hosting', 'GreenLeaf Shopify plan', 'Shopify', inn(21), 'monthly', 2000, 2600], [clients.acme, proj.acme, 'ssl', 'acme staging wildcard SSL', 'Namecheap', inn(40), 'yearly', 3200, 4500], [clients.bright, proj.bright, 'hosting', 'BrightPath shared hosting', 'Hostinger', ago(2), 'yearly', 5400, 8000]])
     await call('POST', '/renewals', { client_id: client, project_id: project, kind, name, vendor, renewal_date: date, cycle, our_cost: cost, client_price: price, status: 'active' });

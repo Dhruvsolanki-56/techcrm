@@ -423,6 +423,69 @@ const newIp = () => `203.0.113.${ipSeq++}`;
   }
 
   /* ------------------------------------------------------------------ */
+  group('Money sheet tabs: assets, bank transactions, contact log, people from the sheet');
+  {
+    for (const [who, U] of [['maintenance intern', K], ['intern', T]]) {
+      ok((await U.call('GET', '/assets')).s === 403 && (await U.call('POST', '/assets', { asset_type: 'Laptop' })).s === 403, 'assets are founder-only: ' + who);
+      ok((await U.call('GET', '/bank_transactions')).s === 403 && (await U.call('POST', '/bank-match', {})).s === 403, 'bank transactions + auto-match are founder-only: ' + who);
+    }
+    ok((await T.call('GET', '/contact-log')).s === 403, 'contact log needs sales access');
+    const a = await F.call('POST', '/assets', { asset_type: 'Laptop', make_model: 'Test Book 14', purchase_value: 55000, status: 'Active' });
+    ok(a.s === 201 && (await F.call('POST', '/assets', { asset_type: 'Laptop', purchase_value: -5 })).s === 400 && (await F.call('POST', '/assets', { make_model: 'x' })).s === 400, 'asset saved; negative value and missing Asset Type refused', a.j);
+    ok((await F.call('POST', '/bank_transactions', { date: '2026-09-01', description: 'nothing' })).s === 400, 'a bank line needs a withdrawal or deposit');
+    ok((await F.call('POST', '/bank_transactions', { date: '2026-09-01', deposit: 10, matched_status: 'Hacked' })).s === 400, 'matched status only accepts Unmatched / Matched / Ignored');
+    const acc = (await F.call('GET', '/accounts')).j[0];
+    const pay = await F.call('POST', '/payments', { date: '2026-09-02', amount: 43210.5, account_id: acc.id, category: 'Consulting' });
+    await F.call('POST', '/bank_transactions', { date: '2026-09-04', deposit: 43210.5, description: 'NEFT CR TEST', account_id: acc.id });
+    const m = await F.call('POST', '/bank-match', {});
+    const line = db.prepare("SELECT * FROM bank_transactions WHERE description='NEFT CR TEST'").get();
+    ok(m.s === 200 && m.j.matched >= 1 && line.matched_status === 'Matched' && line.payment_id === pay.j.id, 'auto-match pairs a deposit with income of the same amount within 5 days', [m.j, line]);
+    ok((await F.call('POST', '/bank-match', {})).j.matched === 0, 'a payment is never matched twice');
+    // Company / Person is what a lead needs (as in the sheet); priority may be blank
+    const co = await F.call('POST', '/leads', { company: 'Only A Company Pvt Ltd' });
+    ok(co.s === 201 && co.j.name === 'Only A Company Pvt Ltd' && co.j.followup_status === 'Not Scheduled', 'a lead with only Company / Person is accepted; Follow-Up Status is worked out', co.j);
+    ok((await F.call('POST', '/leads', { city: 'Pune' })).s === 400, 'a lead without Company / Person or contact is refused');
+    const nb = await F.call('POST', '/leads', { company: 'No Heat Co', priority: '' });
+    ok(nb.s === 201 && nb.j.priority === null, 'priority can be left blank (as in the sheet)', nb.j.priority);
+    // a contact logged with its round + next date shows in the Contact Log
+    await F.call('POST', '/notes', { entity_type: 'lead', entity_id: co.j.id, kind: 'whatsapp', body: 'Sent brochure', followup_round: 'first', next_followup: '2026-12-01' });
+    const log = await F.call('GET', '/contact-log?kind=whatsapp');
+    ok(log.s === 200 && log.j.some((r) => r.lead_id === co.j.id && r.followup_round === 'first' && r.next_followup === '2026-12-01'), 'Contact Log lists the contact with Follow-Up Round and Next Follow-Up Date');
+    ok((await F.call('POST', '/notes', { entity_type: 'lead', entity_id: co.j.id, kind: 'call', body: 'x', next_followup: '2026-13-45' })).s === 400, 'contact with an impossible next date is refused');
+    // people named in the sheet who are not team members yet: kept, then linked when they join
+    const tabs = { 'Master Leads': [['Lead ID', 'Company / Person', 'Assigned To', 'Sales Stage'], ['501', 'Waiting For Zara Co', 'Zara Newjoin', 'New']],
+      Settings: [['Income Categories', 'Expense Categories', 'Statuses', 'Payment Modes', 'Team Members'], ['Consulting', 'Payroll', 'Active', 'UPI', 'Zara Newjoin'], ['Retainer', 'Software/SaaS', 'On Hold', 'Cash', '']],
+      Assets: [['Asset ID', 'Asset Type', 'Make/Model', 'Serial Number', 'Purchase Date', 'Purchase Value', 'Current Value', 'Assigned To', 'Status', 'Notes'], ['A1', 'Phone', 'Test Phone 9', 'SN-1', '01/08/2026', '₹30,000', '₹25,000', 'Zara Newjoin', 'Active', '']],
+      Documents: [['Document ID', 'Document Name', 'Category', 'Upload Date', 'Expiry Date', 'Link/Location', 'Status', 'Owner', 'Notes'], ['D1', 'Test Registration', 'Legal', '02/08/2026', '01/08/2027', 'drive.google.com/test-doc', 'Active', 'Aarav', ''], ['D2', 'Office lease', 'Legal', '', '', 'Cupboard 2', 'Active', '', '']],
+      'Bank Transactions': [['Date', 'Description', 'Reference No', 'Withdrawal', 'Deposit', 'Balance', 'Type', 'Matched Status', 'Match Note'], ['05/08/2026', 'UPI TEST OUT', 'R1', '1,500', '', '', 'UPI', '', '']] };
+    const imp = await F.call('POST', '/workbook/import', { tabs, new_account: 'Sheet Test Bank' });
+    const zl = db.prepare("SELECT * FROM leads WHERE company='Waiting For Zara Co'").get();
+    ok(imp.s === 200 && zl && zl.id === 501 && zl.owner_id === null && zl.assigned_name === 'Zara Newjoin', 'sheet Lead ID is kept; an unknown Assigned To is remembered by name', zl);
+    ok(imp.j.account_created === 'Sheet Test Bank' && db.prepare("SELECT account_id FROM bank_transactions WHERE description='UPI TEST OUT'").get().account_id === db.prepare("SELECT id FROM accounts WHERE name='Sheet Test Bank'").get().id, 'the new bank account is created and used for the statement lines');
+    const doc = db.prepare("SELECT * FROM documents WHERE title='Test Registration'").get(); const lease = db.prepare("SELECT * FROM documents WHERE title='Office lease'").get();
+    ok(doc && doc.url === 'https://drive.google.com/test-doc' && doc.expiry_date === '2027-08-01' && doc.status === 'Active' && doc.owner_id && lease && !lease.url && /Cupboard 2/.test(lease.notes), 'Documents: link, expiry, status, owner; a physical location goes to notes', [doc, lease]);
+    ok(/Payroll/.test(db.prepare("SELECT value FROM settings WHERE key='expense_categories'").get().value), 'the Settings tab sets the Expense Categories list');
+    const z = await F.call('POST', '/users', { name: 'Zara Newjoin', email: 'zara@demo.test', role: 'intern', password: 'Temp-pass-123456', modules: ['leads'] });
+    const after = db.prepare('SELECT owner_id, assigned_name FROM leads WHERE id=501').get(); const asset = db.prepare("SELECT assigned_to FROM assets WHERE make_model='Test Phone 9'").get();
+    ok(z.s === 201 && after.owner_id === z.j.id && after.assigned_name === null && asset.assigned_to === z.j.id && z.j.linked >= 2, 'adding the team member gives them their leads and assets from the sheet', [z.j, after, asset]);
+  }
+
+  /* ------------------------------------------------------------------ */
+  group('Speed: compressed screens, cached safely');
+  {
+    const r1 = await fetch(origin + '/js/core.js', { headers: { 'accept-encoding': 'gzip' } });
+    const tag = r1.headers.get('etag'); await r1.arrayBuffer();
+    ok(r1.status === 200 && r1.headers.get('content-encoding') === 'gzip' && /no-cache/.test(r1.headers.get('cache-control') || '') && tag, 'JS is sent gzip-compressed with an ETag', [...r1.headers]);
+    const r2 = await fetch(origin + '/js/core.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': tag } });
+    ok(r2.status === 304, 'unchanged files answer 304 (nothing re-downloaded)');
+    ok(/Content-Security-Policy/i.test([...r1.headers.keys()].join(' ')), 'compressed files still carry the security headers');
+    for (const p of ['/js/../../server.js', '/%2e%2e/server.js', '/js/..%2f..%2fserver.js', '/../data/crm.db']) {
+      const r = await fetch(origin + p, { headers: { 'accept-encoding': 'gzip' } }); const t = await r.text();
+      ok(!/require\(|SQLite format/.test(t), 'path tricks do not expose server files: ' + p);
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
   group('Security headers');
   const home = await fetch(origin + '/');
   const csp = home.headers.get('content-security-policy') || '';

@@ -238,14 +238,16 @@ function paymentModal(rec, defaults, after) {
 function paymentsTable(root, query, defaults) {
   mountList(root, {
     resource: 'payments', query, searchPlaceholder: 'Search payments…', defaultSort: { key: 'date', dir: 'desc' },
-    filters: query.client_id || query.invoice_id || query.project_id ? [] : [{ key: 'client_id', label: 'Client', lookup: 'clients' }, { key: 'account_id', label: 'Account', lookup: 'accounts' }, { key: 'category', label: 'Income type', options: OPT.incomeCategory }],
+    filters: query.client_id || query.invoice_id || query.project_id ? [] : [{ key: 'client_id', label: 'Client', lookup: 'clients' }, { key: 'account_id', label: 'Account', lookup: 'accounts' }, { key: 'category', label: 'Category', options: OPT.incomeCategory }, { key: 'method', label: 'Payment Mode', options: OPT.payMethod }],
     columns: [{ key: 'date', label: 'Date', render: (r) => fdate(r.date) }, ...(query.client_id || query.invoice_id ? [] : [{ key: 'client_name', label: 'Client', render: (r) => esc(r.client_name || '—') }]),
-      { key: 'invoice_number', label: 'Invoice', render: (r) => `${r.invoice_id ? `<a href="#/invoices/${r.invoice_id}">${esc(r.invoice_number)}</a>` : '<span class="muted">On account</span>'}${r.category && r.category !== 'Client payment' ? `<div class="small muted">${esc(r.category)}${r.grant_name ? ' · ' + esc(r.grant_name) : ''}</div>` : ''}` },
-      { key: 'method', label: 'Method', render: (r) => `${esc(r.method || '—')}<div class="small muted">${esc(r.reference || '')}</div>` }, { key: 'account_name', label: 'Account', render: (r) => esc(r.account_name || '—') },
-      { key: 'tds', label: 'TDS', num: true, render: (r) => (r.tds ? money2(r.tds) : '—') }, { key: 'amount', label: 'Received', num: true, render: (r) => `<b>${money2(r.amount)}</b>` }],
-    footer: (rows) => `<tr><td colspan="${query.client_id || query.invoice_id ? 4 : 5}">Total</td><td class="num">${money2(rows.reduce((s, r) => s + (r.tds || 0), 0))}</td><td class="num">${money2(rows.reduce((s, r) => s + r.amount, 0))}</td></tr>`,
-    add: { label: 'Record payment', onClick: (reload) => paymentModal(null, defaults, reload) }, onRow: null,
-    actions: {}, empty: { title: 'No payments recorded', text: 'Record money received from clients.' },
+      { key: 'project_name', label: 'Project', cls: 'opt', render: (r) => esc(r.project_name || '—') },
+      { key: 'invoice_number', label: 'Invoice ID', cls: 'opt', render: (r) => (r.invoice_id ? `<a href="#/invoices/${r.invoice_id}">${esc(r.invoice_number)}</a>` : '<span class="muted">—</span>') },
+      { key: 'category', label: 'Category', render: (r) => `${esc(r.category || '—')}${r.grant_name ? `<div class="small muted">${esc(r.grant_name)}</div>` : ''}` },
+      { key: 'method', label: 'Payment Mode', render: (r) => `${esc(r.method || '—')}<div class="small muted">${esc(r.reference || '')}</div>` }, { key: 'account_name', label: 'Account', cls: 'opt', render: (r) => esc(r.account_name || '—') },
+      { key: 'tds', label: 'TDS', num: true, render: (r) => (r.tds ? money2(r.tds) : '—') }, { key: 'amount', label: 'Amount', num: true, render: (r) => `<b>${money2(r.amount)}</b>` }],
+    footer: (rows) => `<tr><td colspan="${query.client_id || query.invoice_id ? 6 : 7}">Total</td><td class="num">${money2(rows.reduce((s, r) => s + (r.tds || 0), 0))}</td><td class="num">${money2(rows.reduce((s, r) => s + r.amount, 0))}</td></tr>`,
+    add: { label: 'Add income', onClick: (reload) => paymentModal(null, defaults, reload) }, onRow: null,
+    actions: {}, empty: { title: 'No income recorded', text: 'Record money received — client payments, consulting, product sales, grants.' },
     toolbarExtra: query.client_id || query.invoice_id || query.project_id ? '' : '<a class="btn" href="/api/payments/export.csv">' + icon('download') + ' CSV</a>',
   });
   root.addEventListener('click', (e) => { const tr = e.target.closest('tr[data-id]'); if (!tr || e.target.closest('a,button')) return; GET('/payments/' + tr.dataset.id).then((r) => paymentModal(r, null, () => Router.refresh())).catch(fail); });
@@ -253,10 +255,10 @@ function paymentsTable(root, query, defaults) {
 function expensesTable(root, query, defaults) {
   mountList(root, {
     resource: 'expenses', query, searchPlaceholder: 'Search expenses…', defaultSort: { key: 'date', dir: 'desc' },
-    filters: query.project_id ? [] : [{ key: 'category', label: 'Category', options: OPT.expenseCategory }, { key: 'status', label: 'Status', options: [['paid', 'Paid'], ['pending', 'Pending']] }, { key: 'project_id', label: 'Project', lookup: 'projects' }, { key: 'paid_by_id', label: 'Paid by', lookup: 'users' }],
+    filters: query.project_id ? [] : [{ key: 'category', label: 'Category', options: OPT.expenseCategory }, { key: 'status', label: 'Status', options: [['paid', 'Completed'], ['pending', 'Pending']] }, { key: 'method', label: 'Payment Mode', options: OPT.payMethod }, { key: 'project_id', label: 'Project', lookup: 'projects' }, { key: 'paid_by_id', label: 'Paid by', lookup: 'users' }],
     columns: [{ key: 'date', label: 'Date', render: (r) => fdate(r.date) }, { key: 'category', label: 'Category', render: (r) => `<span class="chip">${esc(r.category || '—')}</span>` },
-      { key: 'vendor', label: 'Paid to', render: (r) => `<b>${esc(r.vendor || '—')}</b><div class="small muted">${esc(r.description || '')}${r.grant_name ? ` · <span class="chip">Grant: ${esc(r.grant_name)}</span>` : ''}${r.receipt_url ? ` · <a href="${esc(r.receipt_url)}" target="_blank" rel="noopener noreferrer">Receipt</a>` : ''}</div>` }, ...(query.project_id ? [] : [{ key: 'project_name', label: 'Project', render: (r) => esc(r.project_name || '—') }]),
-      { key: 'account_name', label: 'From', render: (r) => (r.paid_by_name ? `<span class="badge b-amber">Paid by ${esc(r.paid_by_name)}</span>` : esc(r.account_name || '—')) }, { key: 'status', label: 'Status', render: (r) => badge(r.status) }, { key: 'amount', label: 'Amount', num: true, render: (r) => `<b>${money2(r.amount)}</b>` }],
+      { key: 'vendor', label: 'Vendor', render: (r) => `<b>${esc(r.vendor || '—')}</b><div class="small muted">${esc(r.description && r.description !== r.vendor ? r.description : '')}${r.grant_name ? ` · <span class="chip">Grant: ${esc(r.grant_name)}</span>` : ''}${r.receipt_url ? ` · <a href="${esc(r.receipt_url)}" target="_blank" rel="noopener noreferrer">Receipt Link</a>` : ''}</div>` }, ...(query.project_id ? [] : [{ key: 'project_name', label: 'Project', render: (r) => esc(r.project_name || '—') }]),
+      { key: 'account_name', label: 'Payment Mode', render: (r) => `${esc(r.method || '—')}<div class="small muted">${r.paid_by_name ? `Paid by ${esc(r.paid_by_name)}` : esc(r.account_name || '')}</div>` }, { key: 'status', label: 'Status', render: (r) => badge(r.status, r.status === 'paid' ? 'Completed' : 'Pending') }, { key: 'amount', label: 'Amount', num: true, render: (r) => `<b>${money2(r.amount)}</b>` }],
     footer: (rows) => `<tr><td colspan="${query.project_id ? 5 : 6}">Total</td><td class="num">${money2(rows.reduce((s, r) => s + r.amount, 0))}</td></tr>`,
     add: { label: 'Add expense', onClick: (reload) => editRecord('expenses', null, defaults, reload, { label: 'expense' }) },
     onRow: (r) => editRecord('expenses', r, null, () => Router.refresh(), { label: 'expense' }), empty: { title: 'No expenses', text: 'Log salaries, tools, hosting, rent — everything the company spends.' },
@@ -283,10 +285,11 @@ const barRows = (rows, fmt = money) => { const max = Math.max(1, ...rows.map((r)
 
 route('/finance', async ({ el, query }) => {
   const tab = query.tab || 'overview';
-  const tabs = [{ key: 'overview', label: 'Overview' }, { key: 'payments', label: 'Payments received' }, { key: 'expenses', label: 'Expenses' }, { key: 'accounts', label: 'Accounts & founders' }];
+  const tabs = [{ key: 'overview', label: 'Overview' }, { key: 'payments', label: 'Income' }, { key: 'expenses', label: 'Expenses' }, { key: 'bank', label: 'Bank Transactions' }, { key: 'accounts', label: 'Accounts & founders' }];
   el.innerHTML = pageHead('Finance', 'Money in, money out, and what is left.') + tabsHtml(tabs, tab, '#/finance') + '<div id="tab"></div>'; const t = $('#tab', el);
   if (tab === 'payments') return paymentsTable(t, {}, {});
   if (tab === 'expenses') return expensesTable(t, {}, {});
+  if (tab === 'bank') return bankTable(t);
   if (tab === 'accounts') {
     const sum = await GET('/finance/summary');
     t.innerHTML = `<div class="kpis">${kpi('Total cash', money(sum.cash), `${sum.accounts.length} accounts`)}${kpi('Company owes founders', money(sum.founders.reduce((s, f) => s + f.company_owes, 0)), 'Paid personally, not yet reimbursed')}${kpi('Pending expenses', money(sum.pending_expenses.v), `${sum.pending_expenses.n} bills to pay`)}</div>
@@ -309,6 +312,9 @@ route('/finance', async ({ el, query }) => {
   const rcv = sum.income.cash + sum.income.tds;
   t.innerHTML = `<div class="toolbar"><select id="rg" style="width:auto">${[['month', 'This month'], ['lastmonth', 'Last month'], ['quarter', 'This quarter'], ['fy', 'This financial year'], ['lastfy', 'Last financial year'], ['last12', 'Last 12 months'], ['custom', 'Custom…']].map(([v, l]) => `<option value="${v}" ${(query.from ? 'custom' : preset) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <input type="date" id="rf" value="${from}" style="width:auto"> <span class="muted">to</span> <input type="date" id="rt" value="${to}" style="width:auto"> <button class="btn" id="rgo">Apply</button><span class="grow"></span><span class="muted small">${fdate(from)} – ${fdate(to)}</span></div>
+    <div class="kpis fos">${kpi('Current Balance', money(sum.cash), 'All bank & cash accounts')}${kpi('Total Revenue', money(sum.all_time.revenue), 'All time')}${kpi('Total Expenses', money(sum.all_time.expenses), 'All time')}
+      ${kpi('Runway (Months)', sum.burn > 0 ? (Math.max(0, sum.cash) / sum.burn).toLocaleString('en-IN', { maximumFractionDigits: 1 }) : '—', sum.burn > 0 ? `at ${money(sum.burn)}/month (last 6 months)` : 'No spending in the last 6 months', sum.burn > 0 && sum.cash / sum.burn < 6 ? 'bad' : '')}
+      ${kpi('Grants', money(sum.grants.received), sum.grants.n ? `of ${money(sum.grants.requested)} requested` : 'None yet')}</div>
     <div class="kpis">${kpi('Received', money(rcv), `${sum.income.n} payments${sum.income.tds ? ` · incl. TDS ${money(sum.income.tds)}` : ''}`)}${kpi('Spent', money(sum.expenses.v), `${sum.expenses.n} expenses`)}${kpi('Profit', money(sum.profit), 'Received − spent', sum.profit < 0 ? 'bad' : 'good')}
       ${kpi('Invoiced', money(sum.invoiced.total), `${sum.invoiced.n} invoices`)}${kpi('Still to collect', money(sum.receivables), 'All unpaid invoices')}${kpi('Cash now', money(sum.cash), 'All accounts')}${kpi('Monthly recurring', money(sum.mrr), 'Active maintenance plans')}</div>
     <div class="grid g-main"><div class="stack"><div class="card"><div class="card-h"><h2>Collected vs spent · last 12 months</h2><div class="legend"><span style="--c:var(--accent)">Collected</span><span style="--c:#c47f17">Spent</span></div></div><div class="card-b">${trendChart(sum.trend)}</div></div>
@@ -330,10 +336,11 @@ function renewalsTable(root, query, defaults, { full } = {}) {
   mountList(root, {
     resource: 'renewals', query, searchPlaceholder: 'Search renewals…', defaultSort: { key: 'renewal_date', dir: 'asc' },
     filters: full ? [{ key: 'kind', label: 'Kind', options: OPT.renewalKind }, { key: 'status', label: 'Status', options: [['active', 'Active'], ['lapsed', 'Lapsed'], ['cancelled', 'Cancelled']] }, { key: 'client_id', label: 'Client', lookup: 'clients' }] : [],
-    columns: [{ key: 'name', label: 'Item', render: (r) => `<b>${esc(r.name)}</b><div class="small muted">${esc(renewalKindLabel(r.kind))}${r.vendor ? ' · ' + esc(r.vendor) : ''}</div>` }, ...(query.client_id ? [] : [{ key: 'client_name', label: 'Client', render: (r) => esc(r.client_name || '—') }]),
-      { key: 'renewal_date', label: 'Renews / expires', render: (r) => (r.status !== 'active' ? fdate(r.renewal_date) : `${dueBadge(r.renewal_date)}<div class="small muted">${r.renewal_date ? (daysUntil(r.renewal_date) < 0 ? -daysUntil(r.renewal_date) + ' days ago' : 'in ' + daysUntil(r.renewal_date) + ' days') : ''}</div>`) },
-      { key: 'cycle', label: 'Cycle', render: (r) => pretty(r.cycle) + (r.auto_renew ? ' · auto' : '') + (r.owner_name ? `<div class="small muted">${esc(r.owner_name)}</div>` : '') },
-      ...(isFounder() ? [{ key: 'our_cost', label: 'We pay', num: true, render: (r) => (r.our_cost ? money(r.our_cost) : '—') }, { key: 'client_price', label: 'Client pays', num: true, render: (r) => (r.client_price ? money(r.client_price) : '—') }] : []),
+    columns: [{ key: 'name', label: 'Software/Service', render: (r) => `<b>${esc(r.name)}</b><div class="small muted">${esc(r.category || renewalKindLabel(r.kind))}${r.vendor && r.vendor !== r.name ? ' · ' + esc(r.vendor) : ''}</div>` }, ...(query.client_id ? [] : [{ key: 'client_name', label: 'Client', render: (r) => esc(r.client_name || '—') }]),
+      { key: 'renewal_date', label: 'Renewal Date', render: (r) => (r.status !== 'active' ? fdate(r.renewal_date) : `${dueBadge(r.renewal_date)}<div class="small muted">${r.renewal_date ? (daysUntil(r.renewal_date) < 0 ? -daysUntil(r.renewal_date) + ' days ago' : 'in ' + daysUntil(r.renewal_date) + ' days') : ''}</div>`) },
+      { key: 'cycle', label: 'Cycle', cls: 'opt', render: (r) => pretty(r.cycle) + (r.auto_renew ? ' · auto' : '') },
+      { key: 'owner_name', label: 'Owner', cls: 'opt', render: (r) => (r.owner_name ? esc(r.owner_name) : '<span class="faint">Company</span>') },
+      ...(isFounder() ? [{ key: 'monthly_cost', label: 'Monthly Cost', num: true, render: (r) => (r.our_cost && r.monthly_cost != null ? money(r.monthly_cost) : '—') }, { key: 'annual_cost', label: 'Annual Cost', num: true, cls: 'opt', render: (r) => (r.our_cost && r.annual_cost != null ? money(r.annual_cost) : r.our_cost ? money(r.our_cost) : '—') }, { key: 'client_price', label: 'Client pays', num: true, cls: 'opt', render: (r) => (r.client_price ? money(r.client_price) : '—') }] : []),
       { key: 'status', label: 'Status', render: (r) => badge(r.status) },
       ...(isFounder() ? [{ key: 'a', label: '', sortable: false, render: (r) => (r.status === 'active' && r.cycle !== 'one-time' ? '<button class="btn sm" data-act="renew" title="Mark as renewed and move the date forward">Mark renewed</button>' : '') }] : [])],
     add: isFounder() ? { label: 'Add renewal', onClick: (r) => editRecord('renewals', null, defaults, r, { label: 'renewal' }) } : null,
@@ -342,7 +349,7 @@ function renewalsTable(root, query, defaults, { full } = {}) {
     empty: { title: 'Nothing tracked yet', text: 'Add maintenance plans, domains, hosting, SSL and subscriptions so nothing expires unnoticed.' },
   });
 }
-route('/renewals', ({ el }) => { el.innerHTML = pageHead('Renewals & plans', 'Maintenance plans, domains, hosting, SSL and subscriptions — never miss a renewal.') + '<div id="body"></div>'; renewalsTable($('#body', el), {}, {}, { full: true }); }, { title: 'Renewals', founder: true });
+route('/renewals', ({ el }) => { el.innerHTML = pageHead('Subscriptions & renewals', 'Software subscriptions, maintenance plans, domains, hosting and SSL — never miss a renewal.') + '<div id="body"></div>'; renewalsTable($('#body', el), {}, {}, { full: true }); }, { title: 'Renewals', founder: true });
 
 /* =====================================================  MAINTENANCE  ===================================================== */
 function logsTable(root, query, defaults) {
@@ -362,7 +369,7 @@ route('/maintenance', ({ el }) => {
 route('/documents', ({ el }) => {
   el.innerHTML = pageHead('Documents', 'Every contract, spec, design and file — searchable in one place.') + '<div id="body"></div>';
   const f = isFounder();
-  mountList($('#body', el), { resource: 'documents', searchPlaceholder: 'Search documents…', filters: [{ key: 'category', label: 'Category', options: OPT.docCategory }, { key: 'entity_type', label: 'Linked to', options: f ? [['client', 'Client'], ['project', 'Project'], ['lead', 'Lead'], ['invoice', 'Invoice'], ['quote', 'Quotation'], ['task', 'Task'], ['general', 'General']] : [['project', 'Project'], ['task', 'Task']] }],
+  mountList($('#body', el), { resource: 'documents', searchPlaceholder: 'Search documents…', filters: [{ key: 'category', label: 'Category', options: OPT.docCategory }, ...(f ? [{ key: 'status', label: 'Status', options: OPT.sheetStatus }] : []), { key: 'entity_type', label: 'Linked to', options: f ? [['client', 'Client'], ['project', 'Project'], ['lead', 'Lead'], ['invoice', 'Invoice'], ['quote', 'Quotation'], ['task', 'Task'], ['general', 'General']] : [['project', 'Project'], ['task', 'Task']] }],
     columns: docColumns(true),
     add: { label: 'Upload document', onClick: (reload) => {
       const opts = f ? [['general', 'Company-wide (general)'], ['client', 'A client'], ['project', 'A project'], ['lead', 'A lead']] : [['project', 'A project']];
@@ -463,8 +470,8 @@ route('/settings', async ({ el }) => {
     <div class="card"><div class="card-h"><h2>Move from Google Sheets / Excel</h2></div><div class="card-b stack"><p class="muted" style="margin:0">Bring in your whole <b>TechSentinals CRM</b> sheet (Master Leads, Contact Log) and <b>TechSentinals OS</b> sheet (Clients, Projects, Income, Expenses, Grants, Subscriptions) — paste the link or drop the downloaded .xlsx. You see a preview first; rows already imported are skipped, so it is safe to run again.</p>
       <div class="row wrap"><button class="btn primary" id="imp-wb" type="button">${icon('upload')}Import a whole workbook</button><button class="btn" id="imp-leads" type="button">Just a lead list</button><button class="btn" id="imp-clients" type="button">Just a client list</button></div></div></div>
     </div>
-    <div class="card"><div class="card-h"><h2>Sales lists</h2><span class="muted small">One per line. These are the dropdowns on every lead.</span></div><div class="card-b"><form id="slf" class="stack"><div class="form-grid lists-grid">
-      ${[['lead_services', 'Service departments', 'Leads here are Business side “Service”.'], ['lead_products', 'Products', 'Leads here are Business side “Product”.'], ['lead_categories', 'Categories', ''], ['lead_sources', 'Lead sources', ''], ['income_categories', 'Income categories', 'Used on payments received.']].map(([k, l, h]) => `<label class="f"><span>${l}</span><textarea name="${k}" rows="7">${esc(s[k] || '')}</textarea>${h ? `<div class="hint">${h}</div>` : ''}</label>`).join('')}
+    <div class="card"><div class="card-h"><h2>Lists & Settings</h2><span class="muted small">One per line — the same dropdown lists as your sheets.</span></div><div class="card-b"><form id="slf" class="stack"><div class="form-grid lists-grid">
+      ${[['lead_services', 'Department / Product — Service', 'Leads here are Business Side “Service”.'], ['lead_products', 'Department / Product — Product', 'Leads here are Business Side “Product”.'], ['lead_categories', 'Category', ''], ['lead_sources', 'Lead Source', ''], ['income_categories', 'Income Categories', ''], ['expense_categories', 'Expense Categories', ''], ['payment_modes', 'Payment Modes', ''], ['statuses', 'Statuses', 'Used on documents and assets.'], ['asset_types', 'Asset Types', '']].map(([k, l, h]) => `<label class="f"><span>${l}</span><textarea name="${k}" rows="7">${esc(s[k] || '')}</textarea>${h ? `<div class="hint">${h}</div>` : ''}</label>`).join('')}
     </div><div><button class="btn primary" type="submit">Save lists</button></div></form></div></div></div>`;
   $('#imp-wb', el).addEventListener('click', () => workbookModal(() => Router.refresh()));
   $('#slf', el).addEventListener('submit', async (e) => { e.preventDefault(); const d = {}; $$('#slf textarea', el).forEach((t) => { d[t.name] = t.value; }); try { await PUT('/settings', d); await refreshLookups(); toast('Lists saved'); Router.refresh(); } catch (er) { fail(er); } });

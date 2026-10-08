@@ -688,3 +688,18 @@ details summary { cursor: pointer; color: var(--ink-2); }
   .lead-tb input[type=search] { width: 100%; } .lead-tb select { flex: 1 1 45%; min-width: 0; }
   .split2 { grid-template-columns: 1fr; }
 }
+
+/* ---------- sheet-named views: department tabs, optional columns, small helpers ---------- */
+.dept-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 10px; margin-bottom: 4px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.dept-tabs a { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 99px; font-size: 12.5px; color: var(--ink-2); text-decoration: none; background: var(--bg); white-space: nowrap; }
+.dept-tabs a span { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dept-tabs a:hover { background: var(--subtle); } .dept-tabs a.on { background: var(--ink); border-color: var(--ink); color: #fff; } .dept-tabs a.on span { color: rgba(255,255,255,.75); }
+.kpi.warn .v { color: var(--amber); }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 420px; }
+.inline-sel { display: inline-flex; align-items: center; gap: 6px; } .inline-sel select, .inline-sel input { width: auto; }
+.kpis.fos { margin-bottom: 12px; }
+@media (max-width: 760px) {
+  table.t th.opt, table.t td.opt { display: none; }
+  .clamp2 { max-width: 220px; }
+  .inline-sel { flex: 1 1 45%; } .inline-sel input, .inline-sel select { flex: 1; min-width: 0; }
+}
