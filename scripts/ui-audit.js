@@ -11,7 +11,7 @@
   const waitIdle = async () => { for (let i = 0; i < 40; i++) { await sleep(100); if (!document.querySelector('#view [aria-busy="true"], #view .sk-page')) return; } };
 
   const clients = await GET('/clients'), projects = await GET('/projects'), leads = await GET('/leads'), invoices = await GET('/invoices'), quotes = await GET('/quotes');
-  const pages = ['#/dashboard', '#/tasks', '#/calendar', '#/leads', '#/clients', '#/quotes', '#/projects', '#/maintenance', '#/documents', '#/invoices', '#/renewals', '#/finance', '#/vault', '#/team', '#/team?tab=activity', '#/settings',
+  const pages = ['#/dashboard', '#/tasks', '#/calendar', '#/leads', '#/leads?view=list', '#/followups', '#/followups?show=all', '#/sales-report', '#/grants', '#/clients', '#/quotes', '#/projects', '#/maintenance', '#/documents', '#/invoices', '#/renewals', '#/finance', '#/vault', '#/team', '#/team?tab=activity', '#/settings',
     leads[0] && `#/leads/${leads[0].id}`, clients[0] && `#/clients/${clients[0].id}`, clients[0] && `#/clients/${clients[0].id}?tab=billing`, projects[0] && `#/projects/${projects[0].id}`, projects[0] && `#/projects/${projects[0].id}?tab=tasks`,
     invoices[0] && `#/invoices/${invoices[0].id}`, quotes[0] && `#/quotes/${quotes[0].id}`].filter(Boolean);
 

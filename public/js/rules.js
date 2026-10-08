@@ -23,7 +23,8 @@ const RULES = (() => {
   };
   // which rule each field follows, per resource
   const F = {
-    leads: { name: 'person', email: 'email', phone: 'phone', city: 'place', website: 'url', value: 'money' },
+    // lead names often carry a role, "Vani Mehta (Founder)", and cities can be "Pune / Mumbai": no numbers, but that punctuation is fine
+    leads: { name: 'words', email: 'email', phone: 'phone', city: 'words', country: 'place', website: 'url', value: 'money' },
     clients: { website: 'url', gstin: 'gstin', pan: 'pan', city: 'place', state: 'place', country: 'place', contact_name: 'person', contact_email: 'email', contact_phone: 'phone' },
     contacts: { name: 'person', email: 'email', phone: 'phone', whatsapp: 'phone' },
     projects: { budget: 'money', live_url: 'url', staging_url: 'url', repo_url: 'url', design_url: 'url' },

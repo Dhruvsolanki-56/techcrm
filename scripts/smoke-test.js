@@ -70,7 +70,7 @@ const ok = (cond, name, extra) => { if (cond) { pass++; } else { failed++; conso
   await F.call('DELETE', '/payments/' + pay.j.id); const back = (await F.call('GET', '/invoices/' + m1.id)).j; ok(back.status === 'overdue' && back.paid_amount === 50000, 'deleting payment reopens invoice', back.status);
   ok((await F.call('DELETE', '/invoices/' + adv.id)).s === 409, 'cannot delete invoice that has payments');
   const sum = (await F.call('GET', '/finance/summary?from=2000-01-01&to=2099-12-31')).j; ok(sum.income.cash > 0 && sum.accounts.length === 2 && Array.isArray(sum.trend) && sum.trend.length === 12, 'finance summary shape');
-  const acc = sum.accounts.find((a) => a.name.startsWith('HDFC')); const expectBal = 250000 + sum.income.cash + 800000 - 50000 - (24000 + 7800 + 9200 + 30000 + 18000); ok(Math.abs(acc.balance - expectBal) < 1, 'bank balance = opening + receipts + capital − draws − company-paid expenses', { got: acc.balance, expectBal });
+  const acc = sum.accounts.find((a) => a.name.startsWith('HDFC')); const expectBal = 250000 + sum.income.cash + 800000 - 50000 - (24000 + 7800 + 9200 + 30000 + 18000 + 18000 /* grant-funded hosting */); ok(Math.abs(acc.balance - expectBal) < 1, 'bank balance = opening + receipts + capital − draws − company-paid expenses', { got: acc.balance, expectBal });
   ok(sum.founders.find((f) => f.name.startsWith('Isha')).company_owes === 15000, 'founder owed for personal spend');
 
   // ---- quote, convert lead, clients, vault ----

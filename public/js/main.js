@@ -51,9 +51,9 @@ window.addEventListener('hashchange', (e) => {
 
 const NAV = [
   { items: [{ href: '/dashboard', label: 'Home', icon: 'home' }, { href: '/tasks', label: 'My work', icon: 'check' }, { href: '/calendar', label: 'Calendar', icon: 'calendar' }] },
-  { group: 'Sales', items: [{ href: '/leads', label: 'Pipeline', icon: 'target', show: () => can('leads') }, { href: '/clients', label: 'Clients', icon: 'building', show: () => can('clients') }, { href: '/quotes', label: 'Quotations', icon: 'file', show: () => isFounder() }] },
+  { group: 'Sales', items: [{ href: '/leads', label: 'Pipeline', icon: 'target', show: () => can('leads') }, { href: '/followups', label: 'Follow-ups', icon: 'phone', show: () => can('leads') }, { href: '/sales-report', label: 'Sales report', icon: 'activity', show: () => can('leads') }, { href: '/clients', label: 'Clients', icon: 'building', show: () => can('clients') }, { href: '/quotes', label: 'Quotations', icon: 'file', show: () => isFounder() }] },
   { group: 'Delivery', items: [{ href: '/projects', label: 'Projects', icon: 'briefcase' }, { href: '/maintenance', label: 'Maintenance', icon: 'tool', show: () => can('maintenance') }, { href: '/documents', label: 'Documents', icon: 'folder' }] },
-  { group: 'Money', items: [{ href: '/invoices', label: 'Invoices', icon: 'receipt', show: () => isFounder() }, { href: '/renewals', label: 'Renewals & plans', icon: 'refresh', show: () => isFounder() }, { href: '/finance', label: 'Finance', icon: 'trend', show: () => isFounder() }] },
+  { group: 'Money', items: [{ href: '/invoices', label: 'Invoices', icon: 'receipt', show: () => isFounder() }, { href: '/renewals', label: 'Renewals & plans', icon: 'refresh', show: () => isFounder() }, { href: '/grants', label: 'Grants', icon: 'shield', show: () => isFounder() }, { href: '/finance', label: 'Finance', icon: 'trend', show: () => isFounder() }] },
   { group: 'Company', items: [{ href: '/vault', label: 'Credentials', icon: 'lock', show: () => isFounder() }, { href: '/team', label: 'Team & access', icon: 'users', show: () => isFounder() }, { href: '/settings', label: 'Settings', icon: 'settings', show: () => isFounder() }] },
 ];
 

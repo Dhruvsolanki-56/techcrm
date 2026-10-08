@@ -48,15 +48,18 @@ const dueBadge = (d, done) => {
 };
 
 const STATUS_TONE = {
-  green: ['active', 'won', 'paid', 'done', 'completed', 'accepted', 'resolved'],
+  green: ['active', 'won', 'paid', 'done', 'completed', 'accepted', 'resolved', 'approved', 'disbursed'],
   red: ['overdue', 'lost', 'rejected', 'cancelled', 'lapsed', 'ended', 'failed'],
-  amber: ['pending', 'partial', 'review', 'on_hold', 'expired', 'paused'],
-  blue: ['sent', 'in_progress', 'contacted', 'meeting', 'open'],
+  amber: ['pending', 'partial', 'review', 'on_hold', 'expired', 'paused', 'nurture'],
+  blue: ['sent', 'in_progress', 'contacted', 'meeting', 'open', 'qualified', 'applied'],
   plum: ['maintenance', 'negotiation', 'proforma'],
   accent: ['proposal'],
 };
-const STATUS_LABEL = { active: 'Active', in_progress: 'In progress', on_hold: 'On hold', todo: 'To do', review: 'In review', meeting: 'Meeting', proposal: 'Proposal sent', partial: 'Part-paid' };
+const STATUS_LABEL = { won: 'Converted', qualified: 'Qualified', nurture: 'Nurture', closed: 'Closed', active: 'Active', in_progress: 'In progress', on_hold: 'On hold', todo: 'To do', review: 'In review', meeting: 'Demo / Meeting', proposal: 'Proposal sent', partial: 'Part-paid' };
 const PRIORITY = { low: 1, medium: 2, high: 3, urgent: 4 };
+// lead heat: Hot / Medium / Cold
+const heat = (p) => (p ? `<span class="heat h-${esc(p)}">${esc(pretty(p))}</span>` : '');
+const ROUND_LABEL = { not_started: 'Not started', initial: 'Initial contact', first: '1st follow-up', second: '2nd follow-up', third: '3rd follow-up', complete: 'Follow-up complete' };
 function prio(p) { const n = PRIORITY[p] || 0; return `<span class="nowrap"><span class="pri p${n}"><i></i><i></i><i></i></span>${esc(pretty(p))}</span>`; }
 function badge(v, label) {
   if (v == null || v === '') return '<span class="faint">—</span>';
@@ -251,6 +254,7 @@ function delegate(root, selector, type, fn) {
 
 /* ---------- form builder ---------- */
 const lookupOpts = {
+  grants: () => (App.lookups.grants || []).map((g) => ({ v: g.id, l: g.name })),
   users: () => App.lookups.users.map((u) => ({ v: u.id, l: u.name })),
   clients: () => App.lookups.clients.map((c) => ({ v: c.id, l: c.company })),
   projects: () => App.lookups.projects.map((p) => ({ v: p.id, l: p.name })),
@@ -461,11 +465,11 @@ function mountList(root, cfg) {
 }
 
 /* ---------- notes / activity timeline ---------- */
-const NOTE_ICON = { note: 'note', call: 'phone', meeting: 'meeting', email: 'mail', whatsapp: 'chat', system: 'gear' };
-const NOTE_VERB = { note: 'added a note', call: 'logged a call', meeting: 'logged a meeting', email: 'logged an email', whatsapp: 'logged a WhatsApp chat', system: '' };
+const NOTE_ICON = { note: 'note', call: 'phone', meeting: 'meeting', email: 'mail', whatsapp: 'chat', visit: 'building', demo: 'meeting', proposal: 'file', system: 'gear' };
+const NOTE_VERB = { note: 'added a note', call: 'logged a call', meeting: 'logged a meeting', email: 'logged an email', whatsapp: 'logged a WhatsApp chat', visit: 'logged a visit', demo: 'gave a demo', proposal: 'sent a proposal', system: '' };
 function notesPanel(root, type, id, { canWrite = true, kinds = true, placeholder } = {}) {
   root.innerHTML = `${canWrite ? `<div class="composer"><textarea id="nt-body" rows="2" placeholder="${esc(placeholder || 'Write a note, call summary, decision or WhatsApp gist…')}"></textarea>
-    <div class="bar2">${kinds ? '<select id="nt-kind" aria-label="Type"><option value="note">Note</option><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option></select>' : ''}<span class="grow faint small">Ctrl + Enter to post</span><button class="btn primary sm" id="nt-add">Post</button></div></div>` : ''}
+    <div class="bar2">${kinds ? '<select id="nt-kind" aria-label="Type"><option value="note">Note</option><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="demo">Demo</option><option value="proposal">Proposal</option><option value="visit">Visit</option></select>' : ''}<span class="grow faint small">Ctrl + Enter to post</span><button class="btn primary sm" id="nt-add">Post</button></div></div>` : ''}
     <div class="tl" id="nt-list" aria-busy="true">${skRows(3)}</div>`;
   const list = $('#nt-list', root);
   async function load() {
@@ -500,18 +504,31 @@ function wireDropZone(root, id, onFile) {
 
 /* ---------- documents ---------- */
 function uploadModal(entityType, entityId, after, defaults = {}) {
-  const m = openModal({ title: 'Upload document', sub: 'Up to 60 MB. Stored on your own server.', body: `<div class="form-grid">
-    <div class="full">${dropZone('up-file', 'Drop a file here, or <u>choose one</u>', 'PDF, images, Word, Excel, ZIP…')}</div>
+  const m = openModal({ title: 'Add document', sub: 'Upload a file (up to 60 MB, stored on your own server) or save a link to one in Google Drive.', body: `<div class="seg" id="up-mode" style="margin-bottom:14px"><button type="button" class="on" data-m="file">Upload a file</button><button type="button" data-m="link">Save a link</button></div><div class="form-grid">
+    <div class="full" id="up-filebox">${dropZone('up-file', 'Drop a file here, or <u>choose one</u>', 'PDF, images, Word, Excel, ZIP…')}</div>
+    <label class="f full hidden" id="up-linkbox"><span>Link <i>*</i></span><input id="up-url" inputmode="url" placeholder="https://drive.google.com/…"></label>
     <label class="f full"><span>Title</span><input id="up-title" placeholder="Defaults to the file name"></label>
     <label class="f"><span>Category</span><select id="up-cat">${OPT.docCategory.map((c) => `<option ${c === (defaults.category || 'Other') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-    <label class="f"><span>Notes</span><input id="up-notes"></label></div><div id="up-err" class="callout err hidden" style="margin-top:14px"></div>`,
+    <label class="f"><span>Expires on</span><input type="date" id="up-exp"></label>
+    <label class="f full"><span>Notes</span><input id="up-notes"></label></div><div id="up-err" class="callout err hidden" style="margin-top:14px"></div>`,
     footer: '<button class="btn" data-close>Cancel</button><button class="btn primary" id="up-ok">Upload</button>' });
   wireDropZone(m.el, 'up-file');
+  let mode = 'file';
+  $$('#up-mode [data-m]', m.el).forEach((b) => b.addEventListener('click', () => {
+    mode = b.dataset.m; $$('#up-mode [data-m]', m.el).forEach((x) => x.classList.toggle('on', x === b));
+    $('#up-filebox', m.el).classList.toggle('hidden', mode === 'link'); $('#up-linkbox', m.el).classList.toggle('hidden', mode !== 'link');
+    $('#up-title', m.el).placeholder = mode === 'link' ? 'e.g. Signed NDA — Acme' : 'Defaults to the file name'; $('#up-ok', m.el).textContent = mode === 'link' ? 'Save link' : 'Upload';
+  }));
   $('#up-ok', m.el).addEventListener('click', async () => {
     const file = $('#up-file', m.el).files[0], err = $('#up-err', m.el);
-    if (!file) { err.textContent = 'Choose a file first.'; err.classList.remove('hidden'); return; }
+    const show = (msg) => { err.textContent = msg; err.classList.remove('hidden'); };
+    if (mode === 'link') {
+      try { await POST('/documents/link', { entity_type: entityType, entity_id: entityId || null, url: $('#up-url', m.el).value, title: $('#up-title', m.el).value, category: $('#up-cat', m.el).value, expiry_date: $('#up-exp', m.el).value, notes: $('#up-notes', m.el).value }); m.close(); toast('Link saved'); if (after) after(); } catch (e) { show(e.message); }
+      return;
+    }
+    if (!file) { show('Choose a file first.'); return; }
     const fd = new FormData(); fd.append('entity_type', entityType); if (entityId) fd.append('entity_id', entityId);
-    fd.append('title', $('#up-title', m.el).value); fd.append('category', $('#up-cat', m.el).value); fd.append('notes', $('#up-notes', m.el).value); fd.append('file', file);
+    fd.append('title', $('#up-title', m.el).value); fd.append('category', $('#up-cat', m.el).value); fd.append('notes', $('#up-notes', m.el).value); fd.append('expiry_date', $('#up-exp', m.el).value); fd.append('file', file);
     const b = $('#up-ok', m.el); b.disabled = true; b.textContent = 'Uploading…';
     try {
       const r = await fetch('/api/documents/upload', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'crm' }, credentials: 'same-origin' });
@@ -523,11 +540,11 @@ function uploadModal(entityType, entityId, after, defaults = {}) {
 const INLINE_MIME = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'];
 const fileKind = (r) => { const ext = (r.filename.split('.').pop() || '').toUpperCase().slice(0, 4); return `<span class="logo-sq sm" style="--a-bg:#f1f0ec;--a-fg:#5b574e;font-size:9px">${esc(ext || 'FILE')}</span>`; };
 const docColumns = (showEntity) => [
-  { key: 'title', label: 'Document', render: (r) => `<div class="who">${fileKind(r)}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.title)}</div><div class="t2 ellipsis">${esc(r.filename)} · ${fsize(r.size)}</div></div></div>` },
+  { key: 'title', label: 'Document', render: (r) => `<div class="who">${r.url ? `<span class="fk" style="--fk:var(--blue)">${icon('link')}</span>` : fileKind(r)}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.title)}</div><div class="t2 ellipsis">${r.url ? esc(r.url.replace(/^https?:\/\//, '').slice(0, 60)) : `${esc(r.filename)} · ${fsize(r.size)}`}${r.expiry_date ? ` · expires ${dueBadge(r.expiry_date)}` : ''}</div></div></div>` },
   { key: 'category', label: 'Category', render: (r) => `<span class="tag">${esc(r.category || 'Other')}</span>` },
   ...(showEntity ? [{ key: 'entity_name', label: 'Linked to', render: (r) => (r.entity_type === 'general' ? '<span class="muted">Company</span>' : `<span class="muted">${pretty(r.entity_type)}</span> ${esc(r.entity_name || '—')}`) }] : []),
   { key: 'created_at', label: 'Added', render: (r) => `${fshort(r.created_at)}<div class="t2">${esc(r.uploader_name || '')}</div>` },
-  { key: 'a', label: '', sortable: false, cls: 'nowrap right', render: (r) => `${INLINE_MIME.includes(r.mime) ? `<a class="btn sm" href="/api/files/${r.id}?inline=1" target="_blank" rel="noopener">${icon('eye')}View</a> ` : ''}<a class="btn sm icon" href="/api/files/${r.id}" title="Download">${icon('download')}</a> <button class="btn sm icon ghost" data-act="edit" title="Edit">${icon('edit')}</button>` },
+  { key: 'a', label: '', sortable: false, cls: 'nowrap right', render: (r) => `${r.url ? `<a class="btn sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${icon('arrowUpRight')}Open</a> ` : `${INLINE_MIME.includes(r.mime) ? `<a class="btn sm" href="/api/files/${r.id}?inline=1" target="_blank" rel="noopener">${icon('eye')}View</a> ` : ''}<a class="btn sm icon" href="/api/files/${r.id}" title="Download">${icon('download')}</a> `}<button class="btn sm icon ghost" data-act="edit" title="Edit">${icon('edit')}</button>` },
 ];
 function docsPanel(root, entityType, entityId, { canUpload = true } = {}) {
   mountList(root, {

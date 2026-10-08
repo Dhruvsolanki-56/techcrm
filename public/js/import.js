@@ -35,9 +35,10 @@ function parseCsvText(text) {
   if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
   return rows;
 }
-// minimal .xlsx reader: unzip with the browser's DecompressionStream, read the first sheet
-async function readXlsx(file) {
-  const buf = new Uint8Array(await file.arrayBuffer()); const dv = new DataView(buf.buffer);
+// minimal .xlsx reader: unzip with the browser's DecompressionStream; returns [{ name, rows }] for every tab (or only the first)
+async function readXlsx(file) { return (await readWorkbook(new Uint8Array(await file.arrayBuffer()), { first: true }))[0].rows; }
+async function readWorkbook(buf, { first = false } = {}) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65600); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error('This does not look like an Excel .xlsx file.');
@@ -56,9 +57,8 @@ async function readXlsx(file) {
   const xml = (s) => new DOMParser().parseFromString(s, 'application/xml');
   const tags = (d, t) => [...d.getElementsByTagName(t)];
   const wb = xml(await read('xl/workbook.xml')); const rels = xml((await read('xl/_rels/workbook.xml.rels')) || '<r/>');
-  const rid = tags(wb, 'sheet')[0]?.getAttribute('r:id');
-  const target = (tags(rels, 'Relationship').find((r) => r.getAttribute('Id') === rid)?.getAttribute('Target') || 'worksheets/sheet1.xml').replace(/^\/?(xl\/)?/, '');
-  const sheetXml = await read('xl/' + target); if (!sheetXml) throw new Error('Could not find the first sheet in this workbook.');
+  const sheets = tags(wb, 'sheet').slice(0, first ? 1 : 60).map((sh) => ({ name: sh.getAttribute('name') || 'Sheet', rid: sh.getAttribute('r:id') }));
+  if (!sheets.length) throw new Error('Could not find any sheet in this workbook.');
   const ss = await read('xl/sharedStrings.xml');
   const shared = ss ? tags(xml(ss), 'si').map((si) => tags(si, 't').map((t) => t.textContent).join('')) : [];
   // which cell styles are dates (so 45200 becomes 2023-09-30)
@@ -69,17 +69,24 @@ async function readXlsx(file) {
   }
   const colIdx = (ref) => { let n = 0; for (const ch of ref.replace(/\d+/g, '')) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
   const serialDate = (v) => { const d = new Date(Math.round((Number(v) - 25569) * 86400000)); return isNaN(d) ? v : d.toISOString().slice(0, 10); };
-  return tags(xml(sheetXml), 'row').map((r) => {
-    const out = [];
+  const out = [];
+  for (const sh of sheets) {
+    const target = (tags(rels, 'Relationship').find((r) => r.getAttribute('Id') === sh.rid)?.getAttribute('Target') || 'worksheets/sheet1.xml').replace(/^\/?(xl\/)?/, '');
+    const sheetXml = await read('xl/' + target); if (!sheetXml) continue;
+    out.push({ name: sh.name, rows: tags(xml(sheetXml), 'row').map((r) => {
+    const cells = [];
     tags(r, 'c').forEach((c) => {
       const t = c.getAttribute('t'); const v = c.getElementsByTagName('v')[0]?.textContent ?? '';
       let val = t === 's' ? shared[Number(v)] ?? '' : t === 'inlineStr' ? tags(c, 't').map((x) => x.textContent).join('') : t === 'b' ? (v === '1' ? 'TRUE' : 'FALSE') : v;
       if (!t && v !== '' && dateXf.has(Number(c.getAttribute('s')))) val = serialDate(v);
       else if (!t && /^-?\d+\.\d{6,}$/.test(val)) val = String(Math.round(Number(val) * 100) / 100);    // tidy floating-point noise
-      out[colIdx(c.getAttribute('r') || '')] = val;
+      cells[colIdx(c.getAttribute('r') || '')] = val;
     });
-    return Array.from(out, (x) => x ?? '');
-  });
+    return Array.from(cells, (x) => x ?? '');
+  }) });
+  }
+  if (!out.length) throw new Error('Could not read the sheets in this workbook.');
+  return out;
 }
 async function readSheet(file) {
   const ext = file.name.split('.').pop().toLowerCase();
@@ -142,6 +149,86 @@ function importModal(kind, after) {
       go.dataset.done = '1'; const sub = $('.mh-t p', m.el); if (sub) sub.textContent = 'Finished. The new records are already in your list.'; go.disabled = false; go.textContent = 'Done'; $('[data-close]', m.foot).classList.add('hidden');
       if (after) after();
     } catch (e) { showErr(e.message); go.disabled = false; go.textContent = `Import ${plural(rows.length, noun.slice(0, -1))}`; }
+  });
+  return m;
+}
+
+/* ---------- a whole workbook: the team's Google Sheets (sales + money) ----------
+   Link → the server fetches the sheet as .xlsx (it must be shared by link), or drop the downloaded .xlsx.
+   Every tab is read here; the server recognises the known tabs, shows a preview, then imports. */
+const WB_SECTIONS = [['leads', 'Leads', 'Master Leads'], ['contact_log', 'Contact log entries', 'Contact Log'], ['clients', 'Clients', 'Clients'], ['projects', 'Projects', 'Projects'],
+  ['income', 'Money received', 'Income'], ['expenses', 'Expenses', 'Expenses'], ['grants', 'Grants', 'Grants'], ['subscriptions', 'Subscriptions → Renewals', 'Subscriptions']];
+const WB_MARKERS = /company\/?person|leadid|clientname|projectname|grantname|software\/?service|paymentmode|vendor/i;
+function workbookModal(after) {
+  let tabs = null, preview = null, fileName = '';
+  const accounts = App.lookups.accounts || [];
+  const m = openModal({ title: 'Import a whole workbook', sub: 'Your “TechSentinals CRM” and “TechSentinals OS” Google Sheets, or any Excel file with the same tabs.', size: 'wide',
+    body: `<div id="wb-1"><label class="f"><span>Google Sheet link</span><div class="row"><input id="wb-url" placeholder="https://docs.google.com/spreadsheets/d/…" inputmode="url" style="flex:1"><button class="btn" id="wb-fetch" type="button">Read sheet</button></div>
+        <div class="hint">Works when the sheet is shared as “Anyone with the link can view”. If it is private, use File → Download → Microsoft Excel (.xlsx) and drop the file below.</div></label>
+      <div class="or"><span>or</span></div>${dropZone('wb-file', 'Drop the downloaded .xlsx here, or <u>choose it</u>', 'Google Sheets: File → Download → Microsoft Excel', '.xlsx')}</div>
+      <div id="wb-2" class="hidden"></div><div id="wb-err" class="callout err hidden" role="alert" style="margin-top:14px"></div>`,
+    footer: '<button class="btn" data-close type="button">Cancel</button><button class="btn primary" id="wb-go" type="button" disabled>Import</button>' });
+  const err = $('#wb-err', m.el), go = $('#wb-go', m.el), step2 = $('#wb-2', m.el);
+  const showErr = (msg) => { err.textContent = msg || ''; err.classList.toggle('hidden', !msg); };
+  m.dirty = () => !!tabs && !go.dataset.done;
+  async function use(bytes, name) {
+    const book = await readWorkbook(bytes);
+    tabs = {};
+    for (const sh of book) {        // only tabs that look like data we know (keeps the upload small)
+      if (!sh.rows.slice(0, 15).some((r) => r.some((c) => WB_MARKERS.test(String(c).replace(/\s/g, ''))))) continue;
+      tabs[sh.name] = sh.rows.map((r) => { let n = r.length; while (n && !String(r[n - 1] ?? '').trim()) n--; return r.slice(0, n).map((c) => String(c ?? '').trim()); }).filter((r) => r.some(Boolean));
+    }
+    fileName = name;
+    if (!Object.keys(tabs).length) throw new Error('No known tabs in this workbook (looked for Master Leads, Contact Log, Clients, Projects, Income, Expenses, Grants, Subscriptions).');
+    await runPreview();
+  }
+  async function runPreview() {
+    showErr(''); go.disabled = true; go.textContent = 'Checking…';
+    const acc = $('#wb-acc', m.el) ? $('#wb-acc', m.el).value : (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id || '';
+    preview = await POST('/workbook/import', { tabs, dry_run: true, account_id: acc || null });
+    drawPreview(acc);
+  }
+  function drawPreview(acc) {
+    const sec = preview.sections; const total = Object.values(sec).reduce((n, x) => n + x.added, 0);
+    const people = Object.entries(preview.people_not_found || {});
+    const lists = Object.entries(preview.list_additions || {});
+    const needsAcc = (sec.income && sec.income.added) || (sec.expenses && sec.expenses.added);
+    $('#wb-1', m.el).classList.add('hidden'); step2.classList.remove('hidden');
+    step2.innerHTML = `<div class="im-file"><span class="logo-sq sm" style="--a-bg:var(--accent-soft);--a-fg:var(--accent)">${icon('file')}</span><div class="grow"><b>${esc(fileName)}</b><div class="small muted">Tabs found: ${Object.keys(tabs).map(esc).join(', ')}</div></div><button class="btn sm" id="wb-again" type="button">Use another</button></div>
+      <div class="tbl"><table class="t"><thead><tr><th>What</th><th class="num">In the sheet</th><th class="num">Will be added</th><th class="num">Already in CRM</th><th>Skipped</th></tr></thead><tbody>
+      ${WB_SECTIONS.filter(([k]) => sec[k]).map(([k, label, tab]) => { const x = sec[k]; return `<tr><td><b>${label}</b><div class="t2">from “${tab}”</div></td><td class="num">${x.found}</td><td class="num"><b>${x.added}</b></td><td class="num">${x.already || '—'}</td><td class="small">${x.skipped.length ? `<details><summary>${x.skipped.length}</summary>${x.skipped.slice(0, 40).map((t) => `<div>${esc(t)}</div>`).join('')}</details>` : '—'}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      ${needsAcc ? `<label class="f" style="margin-top:14px;max-width:360px"><span>Money in and out goes through account</span><select id="wb-acc">${accounts.length ? accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(acc) ? 'selected' : ''}>${esc(a.name)}</option>`).join('') : '<option value="">— No account yet (add one in Finance first) —</option>'}</select><div class="hint">So the bank balance in Finance matches. Income from your own company is treated as founders' money, not client income.</div></label>` : ''}
+      ${people.length ? `<div class="callout warn" style="margin-top:14px"><b>Not matched to a team member:</b> ${people.map(([n, c]) => `${esc(n)} (${c})`).join(', ')}. Add them under Team &amp; access first (same first name is enough), then import, so their leads and subscriptions are assigned to them.</div>` : ''}
+      ${lists.length ? `<div class="callout info" style="margin-top:12px">New dropdown values will be added: ${lists.map(([k, v]) => v.map(esc).join(', ')).join(', ')}.</div>` : ''}
+      ${(preview.warnings || []).length ? `<details class="small" style="margin-top:12px"><summary>${plural(preview.warnings.length, 'note')} about individual rows</summary>${preview.warnings.slice(0, 80).map((w) => `<div class="muted">${esc(w)}</div>`).join('')}</details>` : ''}`;
+    $('#wb-again', step2).addEventListener('click', () => { tabs = null; step2.classList.add('hidden'); $('#wb-1', m.el).classList.remove('hidden'); go.disabled = true; go.textContent = 'Import'; });
+    const as = $('#wb-acc', step2); if (as) as.addEventListener('change', () => runPreview().catch((e) => showErr(e.message)));
+    go.disabled = !total; go.textContent = total ? `Import ${plural(total, 'record')}` : 'Nothing new to import';
+  }
+  $('#wb-fetch', m.el).addEventListener('click', async () => {
+    const b = $('#wb-fetch', m.el); showErr(''); b.disabled = true; b.classList.add('busy'); b.textContent = 'Reading…';
+    try { const r = await POST('/workbook/fetch', { url: $('#wb-url', m.el).value }); const bin = atob(r.data); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); await use(bytes, r.name); }
+    catch (e) { showErr(e.message); }
+    b.disabled = false; b.classList.remove('busy'); b.textContent = 'Read sheet';
+  });
+  $('#wb-url', m.el).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#wb-fetch', m.el).click(); } });
+  wireDropZone(m.el, 'wb-file', async (file) => { showErr(''); try { if (!/\.xlsx$/i.test(file.name)) throw new Error('Choose the .xlsx file (Google Sheets: File → Download → Microsoft Excel).'); await use(new Uint8Array(await file.arrayBuffer()), file.name); } catch (e) { showErr(e.message); } });
+  go.addEventListener('click', async () => {
+    if (go.dataset.done) { m.close(); return; }
+    go.disabled = true; go.textContent = 'Importing…'; go.classList.add('busy'); showErr('');
+    try {
+      const acc = $('#wb-acc', m.el) ? $('#wb-acc', m.el).value : null;
+      const r = await POST('/workbook/import', { tabs, account_id: acc || null });
+      await refreshLookups();
+      const parts = WB_SECTIONS.filter(([k]) => r.sections[k] && r.sections[k].added).map(([k, label]) => `<li><b>${r.sections[k].added}</b> ${label.toLowerCase()}</li>`).join('');
+      step2.innerHTML = `<div class="im-done"><span class="im-tick">${icon('check')}</span><h3>Imported</h3><ul class="wb-done">${parts || '<li>Nothing new</li>'}</ul>
+        <p class="muted">Open <a href="#/followups" data-close-link>Follow-ups</a> for today's calls, or the <a href="#/sales-report" data-close-link>Sales report</a> to check the numbers against your sheet.</p></div>`;
+      $$('[data-close-link]', step2).forEach((a) => a.addEventListener('click', () => m.close()));
+      go.dataset.done = '1'; go.textContent = 'Done'; go.disabled = false; $('[data-close]', m.foot).classList.add('hidden');
+      if (after) after();
+    } catch (e) { showErr(e.message); go.disabled = false; go.textContent = 'Import'; }
+    go.classList.remove('busy');
   });
   return m;
 }

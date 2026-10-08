@@ -10,8 +10,15 @@ Want to look around first? Double-click **`start-demo.bat`** — separate sample
 
 Needs Node.js 20+. Manual: `npm install`, then `npm start`.
 
-## Moving your Excel lists in
-**Pipeline → Import** (leads) or **Clients → Import** (also under *Settings → Move from Excel*). Drop an `.xlsx` or `.csv` file whose first row is the column headings. The CRM guesses which column is which (Name, Mobile, Budget, Remarks…), you check the matching, then press *Import*. Rows already in the CRM (same email/phone/name for leads, same company for clients) are skipped, so running it twice is safe. Dates like 05/11/2026 are read as day/month. Old `.xls` files: save as `.xlsx` first. Founders only.
+## Moving your Google Sheets / Excel in
+**Whole workbook (recommended):** *Settings → Move from Google Sheets / Excel → Import a whole workbook*. Paste the Google Sheet link (it must be shared as *Anyone with the link can view* for this step) or drop the file from *File → Download → Microsoft Excel*. It reads the tabs it knows — **Master Leads, Contact Log** (sales sheet) and **Clients, Projects, Income, Expenses, Grants, Subscriptions** (money sheet) — and shows a preview first: how many rows will be added, what is already in the CRM, and which people it could not match. Nothing is saved until you press *Import*. Running it again only adds new rows.
+1. Add your team first under *Team & access* (first name is enough for matching), so leads and subscriptions land on the right person.
+2. Import the sales sheet, then the money sheet (pick the bank account money moved through).
+3. Afterwards set both Google Sheets back to **Restricted** — they hold customers' phone numbers and emails.
+
+Cells with several phone numbers keep the first as the phone and the rest in the lead's notes; invalid emails/phones are kept in notes, not lost. New departments, categories and sources from the sheet are added to the dropdowns (*Settings → Sales lists*).
+
+**Single list:** **Pipeline → Import** (leads) or **Clients → Import** (also under *Settings → Move from Excel*). Drop an `.xlsx` or `.csv` file whose first row is the column headings. The CRM guesses which column is which (Name, Mobile, Budget, Remarks…), you check the matching, then press *Import*. Rows already in the CRM (same email/phone/name for leads, same company for clients) are skipped, so running it twice is safe. Dates like 05/11/2026 are read as day/month. Old `.xls` files: save as `.xlsx` first. Founders only.
 
 ## Public demo on Render + Netlify (free, no card)
 Sample data only. It resets itself, because Render's free disk is wiped whenever the service restarts or wakes up.
@@ -29,22 +36,26 @@ The free Render server sleeps after 15 minutes without visitors, so the first vi
 | Home, calendar, tasks | everything | tasks they are on (even outside their projects), projects they are added to |
 | Projects (specs, files, timeline) | all | only assigned projects (no money) |
 | Leads, all clients, all projects, maintenance log | all | only if a founder ticks it for that person |
-| Quotations, invoices, renewals & plans, finance | all | never |
+| Quotations, invoices, renewals & plans, finance, grants | all | never |
 | Credentials vault | all, every reveal logged | never |
 | Team, activity log, settings, backups, CSV export | yes | never |
 
 New accounts get a temporary password and can do nothing until they choose their own.
 
 ## What is inside
-- **Pipeline** – board or list, follow-ups, call/meeting notes, *Convert to client (+ project)*.
+- **Pipeline** – board or list with the same fields as the sales sheet: department/product (Service or Product is worked out from it), category, market (India / Foreign), **priority (Hot / Medium / Cold)**, follow-up round (Initial → 3rd → Complete), next action, last contact, meeting/proposal/close dates, win probability by stage. Filter by department, priority, market, owner, source. *Convert to client (+ project)*.
+- **Follow-ups** – the morning call list: overdue, today, next 7 days, later, no date; *Mine / Everyone*; call and WhatsApp buttons; **Log contact** records the call/WhatsApp/visit, its outcome, moves the stage and round, and sets the next follow-up in one popup.
+- **Sales report** – funnel by stage, India vs Foreign, Service vs Product, 12-month added/converted/lost, and tables by department, source, person and category (conversion, hot, overdue, pipeline, weighted value). CSV export.
+- **Grants** (founders) – requested, received, still to come, how much is spent (expenses tagged with the grant) and the next reporting date (also on the calendar).
 - **Clients** – details, GSTIN, contacts, projects, invoices & payments, files, credentials, support log, timeline.
 - **Projects** – scope/specs, links, team, task board, files, credentials, project profit.
 - **Tasks as team work** (the useful parts of Jira, nothing more) – put **several people** on one task; split it into a **checklist** where each step can belong to one of them; a **discussion** where typing **@** mentions a teammate; an automatic **history** (who changed status, due date, people…); **watchers** who get a bell notification for new comments and status changes (people on the task, the creator, anyone who comments or is mentioned — anyone can Watch/Unwatch). Every task has a short key like **T-12** you can search for, and notifications open the task directly. Interns on a task can move it, tick the checklist and discuss; only founders change who is on it. Teammates on the project who aren't on the task can read and comment but not change it.
 - **Quotations → Invoices** – GST (CGST+SGST / IGST), FY numbering, print/PDF, part-payments with TDS, auto *paid / overdue*, and a one-click **payment reminder** (copy, WhatsApp or email — ready-written with your bank/UPI details).
-- **Renewals & plans** – maintenance plans (AMC), domains, hosting, SSL, subscriptions; *Mark renewed* rolls the date. Active plans = your monthly recurring income.
+- **Renewals & plans** – maintenance plans (AMC), domains, hosting, SSL, subscriptions (with who owns each); *Mark renewed* rolls the date. Active plans = your monthly recurring income.
 - **Maintenance** – support work log per client/project.
-- **Finance** – received vs spent, profit, unpaid-invoice ageing, GST position, bank/cash accounts, founders' capital / withdrawals / money paid personally.
+- **Finance** – received vs spent (income types: client payment, consulting, product sales, grant…; expenses can carry a receipt link), profit, unpaid-invoice ageing, GST position, bank/cash accounts, founders' capital / withdrawals / money paid personally.
 - **Credentials vault** – AES-256-GCM encrypted, founders only, every reveal logged.
+- **Documents** – upload files or save links (Google Drive, Dropbox…); expiry dates (registrations, certificates, contracts) show on the calendar.
 - Every *New…* / *Edit* opens as a popup over the page you are on (bottom sheet on phones). Unsaved changes are never lost by a stray click — it asks first. **Ctrl+Enter** saves.
 - **Calendar**, **Ctrl+K search**, in-app reminders, **activity log** (Team → Activity log).
 

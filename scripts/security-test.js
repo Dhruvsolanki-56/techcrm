@@ -368,6 +368,61 @@ const newIp = () => `203.0.113.${ipSeq++}`;
   ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='import'").get().n === 4, 'every import is written to the activity log');
 
   /* ------------------------------------------------------------------ */
+  group('Sales, grants & workbook import');
+  {
+    const lead = await F.call('POST', '/leads', { name: 'Sheet Style Lead', priority: 'hot', market: 'Foreign', department: 'SaaS product', stage: 'qualified', followup_round: 'first' });
+    const lr = db.prepare('SELECT * FROM leads WHERE id=?').get(lead.j.id);
+    ok(lead.s === 201 && lr.business_side === 'Product' && lr.priority === 'hot', 'business side is worked out from the department list', lr);
+    ok((await F.call('POST', '/leads', { name: 'Bad heat', priority: 'boiling' })).s === 400 && (await F.call('POST', '/leads', { name: 'Bad round', followup_round: 'ninth' })).s === 400 && (await F.call('POST', '/leads', { name: 'Bad market', market: 'Mars' })).s === 400, 'priority, follow-up round and market only accept known values');
+    await F.call('PUT', '/leads/' + lead.j.id, { stage: 'lost', lost_reason: 'test' });
+    ok(db.prepare('SELECT closed_on FROM leads WHERE id=?').get(lead.j.id).closed_on, 'closing a lead stamps the closed date');
+    await F.call('PUT', '/leads/' + lead.j.id, { stage: 'meeting' });
+    ok(!db.prepare('SELECT closed_on FROM leads WHERE id=?').get(lead.j.id).closed_on, 're-opening a lead clears the closed date');
+    await F.call('POST', '/notes', { entity_type: 'lead', entity_id: lead.j.id, kind: 'call', body: 'Called, wants a demo' });
+    ok(db.prepare('SELECT last_contact FROM leads WHERE id=?').get(lead.j.id).last_contact === new Date().toISOString().slice(0, 10) || db.prepare('SELECT last_contact FROM leads WHERE id=?').get(lead.j.id).last_contact, 'logging a call sets "last contact"');
+    const an = await F.call('GET', '/sales/analytics');
+    ok(an.s === 200 && an.j.total.leads > 0 && Array.isArray(an.j.by_department) && an.j.monthly.length === 12, 'sales report returns totals, breakdowns and 12 months', an.j.total);
+    ok((await T.call('GET', '/sales/analytics')).s === 403, 'sales report: intern without sales access is blocked');
+    ok((await T.call('GET', '/grants')).s === 403 && (await K.call('POST', '/grants', { name: 'x' })).s === 403, 'grants are founder-only (read and write)');
+    const g = await F.call('POST', '/grants', { name: 'Test grant', requested: 1000, received: 500, status: 'disbursed' });
+    ok(g.s === 201 && (await F.call('POST', '/grants', { name: 'x', status: 'stolen' })).s === 400, 'grant created; unknown grant status refused');
+    const lk = await F.call('POST', '/documents/link', { title: 'Drive folder', url: 'drive.google.com/x', entity_type: 'general' });
+    ok(lk.s === 201 && db.prepare('SELECT url FROM documents WHERE id=?').get(lk.j.id).url === 'https://drive.google.com/x', 'document links are saved (https added)');
+    ok((await F.call('POST', '/documents/link', { title: 'x', url: 'javascript:alert(1)', entity_type: 'general' })).s === 400, 'javascript: links are refused');
+    ok((await T.call('POST', '/documents/link', { title: 'x', url: 'https://example.com', entity_type: 'general' })).s === 403, 'interns cannot add company-wide document links');
+    ok((await F.call('GET', '/files/' + lk.j.id)).s === 404, 'a link document has no file to download');
+    const set = await F.call('PUT', '/settings', { lead_sources: 'LinkedIn\nlinkedin\n  Trade   fair  \n\n' + 'x'.repeat(200) });
+    const src = db.prepare("SELECT value FROM settings WHERE key='lead_sources'").get().value.split('\n');
+    ok(set.s === 200 && src.length === 3 && src[1] === 'Trade fair' && src[2].length === 60, 'settings lists: duplicates and blanks removed, long values trimmed', src);
+
+    // workbook import (Google Sheets / Excel with several tabs)
+    const H = ['Lead ID', 'Date Added', 'Company / Person', 'Contact Person', 'Phone / WhatsApp', 'Email', 'City', 'Country', 'Market', 'Business Side', 'Department / Product', 'Category', 'Requirement / Interested In', 'Lead Source', 'Assigned To', 'Priority', 'Sales Stage', 'Follow-Up Round'];
+    const tabs = { 'Master Leads': [['Master Leads'], H,
+      ['1', '01/09/2026', 'Sheet Co One', 'Asha', '98765 43001', 'one@sheet.example', 'Pune', 'India', 'India', 'Service', 'Website', 'Retail', 'Website', 'Referral', 'Isha', 'Hot', 'Proposal Sent', '1st Follow-Up'],
+      ['2', '02/09/2026', 'Sheet Co Two', '', 'not a phone', 'bad-email', 'Dubai', 'UAE', 'Foreign', 'Product', 'Brand New Product', 'Retail', '', 'Trade fair', 'Nobody Known', 'Cold', 'Lost', 'Follow-Up Complete'],
+      ['3', '03/09/2026', 'Sheet Co Three', '', '98765 43003; 98765 43004', '', '', '', 'India', 'Service', 'Website', '', '', '', '', '', 'New Lead', ''],
+      ['4', '03/09/2026', 'Sheet Co Four', '', '9.876543005E9', '', '', '', 'India', 'Service', 'Website', '', '', '', '', '', 'New Lead', '']],
+      Grants: [['Grant Name', 'Funder', 'Amount Requested', 'Amount Received', 'Status'], ['Sheet Grant', 'Some Council', '₹2,00,000', '₹50,000', 'Disbursed']] };
+    ok((await K.call('POST', '/workbook/import', { tabs })).s === 403 && (await T.call('POST', '/workbook/fetch', { url: 'https://docs.google.com/spreadsheets/d/abc' })).s === 403, 'interns cannot import a workbook or fetch a sheet');
+    ok((await F.call('POST', '/workbook/import', { tabs: 'nope' })).s === 400, 'workbook import needs tabs');
+    for (const url of ['http://127.0.0.1:3000/api/me', 'https://evil.example/spreadsheets/d/abc', 'https://docs.google.com.evil.example/spreadsheets/d/abc', 'file:///etc/passwd', 'https://docs.google.com/document/d/abc'])
+      ok((await F.call('POST', '/workbook/fetch', { url })).s === 400, 'sheet fetch only accepts Google Sheets links (no SSRF): ' + url);
+    const before = db.prepare('SELECT COUNT(*) n FROM leads').get().n;
+    const dry = await F.call('POST', '/workbook/import', { tabs, dry_run: true });
+    ok(dry.s === 200 && dry.j.sections.leads.added === 4 && dry.j.sections.grants.added === 1 && db.prepare('SELECT COUNT(*) n FROM leads').get().n === before && !db.prepare("SELECT 1 FROM grants WHERE name='Sheet Grant'").get(), 'preview (dry run) shows counts and changes nothing', dry.j.sections);
+    ok(dry.j.people_not_found['Nobody Known'] && dry.j.list_additions.lead_products && dry.j.list_additions.lead_products.includes('Brand New Product'), 'preview lists unknown people and new dropdown values', [dry.j.people_not_found, dry.j.list_additions]);
+    const real = await F.call('POST', '/workbook/import', { tabs });
+    const one = db.prepare("SELECT * FROM leads WHERE company='Sheet Co One'").get(); const two = db.prepare("SELECT * FROM leads WHERE company='Sheet Co Two'").get();
+    ok(real.s === 200 && one && one.stage === 'proposal' && one.priority === 'hot' && one.followup_round === 'first' && one.owner_id === db.prepare("SELECT id FROM users WHERE email='isha@demo.test'").get().id, 'leads imported with stage, heat, round and owner matched by first name', one);
+    ok(two && !two.email && /bad-email/.test(two.notes || '') && two.closed_on && two.business_side === 'Product', 'bad email kept in notes, lost lead gets a closed date', two);
+    const three = db.prepare("SELECT * FROM leads WHERE company='Sheet Co Three'").get(); const four = db.prepare("SELECT phone FROM leads WHERE company='Sheet Co Four'").get();
+    ok(three.phone === '98765 43003' && /Other phones: 98765 43004/.test(three.notes || '') && four.phone === '9876543005', 'several numbers in one cell: first is the phone, the rest go to notes; 9.87E9 cells are expanded', [three.phone, three.notes, four.phone]);
+    const again = await F.call('POST', '/workbook/import', { tabs });
+    ok(again.j.sections.leads.added === 0 && again.j.sections.grants.added === 0, 'importing the same workbook again adds nothing');
+    ok(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='import' AND entity='workbook'").get().n >= 2 || db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='import'").get().n >= 6, 'workbook imports are written to the activity log');
+  }
+
+  /* ------------------------------------------------------------------ */
   group('Security headers');
   const home = await fetch(origin + '/');
   const csp = home.headers.get('content-security-policy') || '';

@@ -3,8 +3,17 @@
 
 /* ---------- option lists ---------- */
 const OPT = {
-  leadStage: [['new', 'New'], ['contacted', 'Contacted'], ['meeting', 'Meeting / Demo'], ['proposal', 'Proposal sent'], ['negotiation', 'Negotiation'], ['won', 'Won'], ['lost', 'Lost']],
-  leadSource: ['Website', 'Referral', 'LinkedIn', 'Instagram', 'WhatsApp', 'Cold call / email', 'Existing client', 'Event / Meetup', 'Upwork / Freelance', 'Other'],
+  leadStage: [['new', 'New'], ['contacted', 'Contacted'], ['qualified', 'Qualified'], ['meeting', 'Demo / Meeting'], ['proposal', 'Proposal sent'], ['negotiation', 'Negotiation'], ['won', 'Converted'], ['closed', 'Closed'], ['lost', 'Lost'], ['nurture', 'Nurture']],
+  leadPriority: [['hot', 'Hot'], ['medium', 'Medium'], ['cold', 'Cold']],
+  followRound: [['not_started', 'Not started'], ['initial', 'Initial contact'], ['first', '1st follow-up'], ['second', '2nd follow-up'], ['third', '3rd follow-up'], ['complete', 'Follow-up complete']],
+  market: [['India', 'India'], ['Foreign', 'Foreign']],
+  contactKind: [['call', 'Call'], ['whatsapp', 'WhatsApp'], ['email', 'Email'], ['meeting', 'Meeting'], ['demo', 'Demo'], ['proposal', 'Proposal'], ['visit', 'Visit'], ['note', 'Other / note']],
+  grantStatus: [['applied', 'Applied'], ['approved', 'Approved'], ['disbursed', 'Disbursed'], ['closed', 'Closed'], ['rejected', 'Rejected']],
+  // these lists are edited by founders in Settings → Sales lists
+  get leadSource() { return settingList('lead_sources'); },
+  get leadCategory() { return settingList('lead_categories'); },
+  get incomeCategory() { return settingList('income_categories'); },
+  get leadDept() { return [...settingList('lead_services').map((d) => [d, d + ' · Service']), ...settingList('lead_products').map((d) => [d, d + ' · Product'])]; },
   service: ['Website', 'Web application', 'Mobile app', 'E-commerce', 'CRM / ERP / Custom software', 'UI / UX design', 'SEO / Digital marketing', 'Maintenance / AMC', 'Hosting / Domain', 'Consulting', 'Other'],
   clientStatus: [['prospect', 'Prospect'], ['active', 'Active'], ['past', 'Past client'], ['archived', 'Archived']],
   projectStatus: [['planning', 'Planning'], ['active', 'In progress'], ['review', 'In review / UAT'], ['on_hold', 'On hold'], ['completed', 'Completed'], ['maintenance', 'Maintenance'], ['cancelled', 'Cancelled']],
@@ -26,6 +35,12 @@ const OPT = {
   invoiceStatus: [['draft', 'Draft'], ['sent', 'Sent'], ['partial', 'Partially paid'], ['paid', 'Paid'], ['overdue', 'Overdue'], ['cancelled', 'Cancelled']],
 };
 
+function settingList(key) { return String((App.lookups.settings || {})[key] || '').split('\n').map((x) => x.trim()).filter(Boolean); }
+// keep a record's current value selectable even if it was removed from the list since
+const withValue = (opts, v) => (v == null || v === '' || opts.some((o) => String(Array.isArray(o) ? o[0] : o) === String(v)) ? opts : [...opts, v]);
+const STAGE_PROB = { new: 10, contacted: 20, qualified: 35, meeting: 50, proposal: 65, negotiation: 80, won: 100, closed: 0, lost: 0, nurture: 10 };
+const CLOSED_STAGES = ['won', 'closed', 'lost'];
+
 /* ---------- record forms (used for create + edit everywhere) ----------
    S('Title') starts a labelled group inside the popup. */
 const S = (section, hint) => ({ section, hint });
@@ -43,19 +58,29 @@ const FORM_INFO = {
   renewals: 'Anything that renews: maintenance plans, domains, hosting, SSL, subscriptions.',
   maintenance_logs: 'A fix, update or support request for a live client.',
   events: 'A date to remember. Shows on everyone’s calendar.',
+  grants: 'Government or programme funding: what you asked for, what came in, what is due to report.',
 };
 const FORMS = {
-  leads: () => [
+  leads: (rec) => [
     S('Who'),
-    { name: 'name', label: 'Contact person', required: true }, { name: 'company', label: 'Company' },
-    { name: 'email', label: 'Email', type: 'email' }, { name: 'phone', label: 'Phone / WhatsApp', type: 'tel' },
-    { name: 'city', label: 'City' }, { name: 'website', label: 'Website' },
-    S('Deal'),
-    { name: 'service', label: 'Interested in', type: 'select', options: OPT.service }, { name: 'value', label: 'Expected value (₹)', type: 'money' },
-    { name: 'stage', label: 'Stage', type: 'select', options: OPT.leadStage, required: true, default: 'new' }, { name: 'source', label: 'Came from', type: 'select', options: OPT.leadSource },
-    { name: 'owner_id', label: 'Owner', type: 'select', lookup: 'users' }, { name: 'next_followup', label: 'Next follow-up', type: 'date' },
+    { name: 'company', label: 'Company / person' }, { name: 'name', label: 'Contact person', required: true },
+    { name: 'phone', label: 'Phone / WhatsApp', type: 'tel' }, { name: 'email', label: 'Email', type: 'email' },
+    { name: 'city', label: 'City' }, { name: 'country', label: 'Country', default: 'India' },
+    { name: 'market', label: 'Market', type: 'select', options: OPT.market, default: 'India' }, { name: 'website', label: 'Website' },
+    S('What they need'),
+    { name: 'department', label: 'Department / product', type: 'select', options: withValue(OPT.leadDept, rec && rec.department), help: 'Service or Product is filled in from this.' },
+    { name: 'category', label: 'Category', type: 'select', options: withValue(OPT.leadCategory, rec && rec.category) },
+    { name: 'requirement', label: 'Requirement / interested in', type: 'textarea', full: true, rows: 2 },
+    { name: 'value', label: 'Deal value (₹, INR equivalent)', type: 'money' }, { name: 'source', label: 'Lead source', type: 'select', options: withValue(OPT.leadSource, rec && rec.source) },
+    S('Where it stands'),
+    { name: 'stage', label: 'Sales stage', type: 'select', options: OPT.leadStage, required: true, default: 'new' }, { name: 'priority', label: 'Priority', type: 'select', options: OPT.leadPriority, required: true, default: 'medium' },
+    { name: 'followup_round', label: 'Follow-up round', type: 'select', options: OPT.followRound, required: true, default: 'not_started' }, { name: 'owner_id', label: 'Assigned to', type: 'select', lookup: 'users' },
+    { name: 'next_followup', label: 'Next follow-up', type: 'date' }, { name: 'last_contact', label: 'Last contact', type: 'date' },
+    { name: 'next_action', label: 'Next action', full: true, placeholder: 'e.g. Send demo video and pricing' },
+    { name: 'meeting_date', label: 'Meeting / demo date', type: 'date' }, { name: 'proposal_date', label: 'Proposal date', type: 'date' },
+    { name: 'closed_on', label: 'Conversion / close date', type: 'date', help: 'Filled in automatically when the stage becomes Converted, Closed or Lost.' }, { name: 'lost_reason', label: 'Lost / closed reason' },
     S('Notes'),
-    { name: 'notes', label: 'Requirements / notes', type: 'textarea', full: true, rows: 3 },
+    { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 3 },
   ],
   clients: () => [
     S('Company'),
@@ -104,8 +129,10 @@ const FORMS = {
       { name: 'description', label: 'Details / instructions', type: 'textarea', full: true, rows: 4 },
     ];
   },
-  documents: () => [
-    { name: 'title', label: 'Title', required: true, full: true }, { name: 'category', label: 'Category', type: 'select', options: OPT.docCategory, full: true }, { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
+  documents: (rec) => [
+    { name: 'title', label: 'Title', required: true, full: true }, { name: 'category', label: 'Category', type: 'select', options: OPT.docCategory },
+    { name: 'expiry_date', label: 'Expires on', type: 'date', help: 'Shows on the calendar so renewals of licences, agreements and registrations are not missed.' },
+    ...(rec && rec.url ? [{ name: 'url', label: 'Link', full: true }] : []), { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
   ],
   payments: () => [
     S('Payment'),
@@ -115,6 +142,8 @@ const FORMS = {
     S('Where it went'),
     { name: 'account_id', label: 'Into account', type: 'select', lookup: 'accounts' }, { name: 'method', label: 'Method', type: 'select', options: OPT.payMethod },
     { name: 'reference', label: 'Reference / UTR no.' }, { name: 'notes', label: 'Notes' },
+    S('Type of income'),
+    { name: 'category', label: 'Income category', type: 'select', options: withValue(OPT.incomeCategory, null), default: 'Client payment' }, { name: 'grant_id', label: 'For grant', type: 'select', lookup: 'grants', help: 'Only when this money is a grant disbursement.' },
   ],
   expenses: () => [
     S('Expense'),
@@ -127,6 +156,7 @@ const FORMS = {
     { name: 'method', label: 'Method', type: 'select', options: OPT.payMethod }, { name: 'reference', label: 'Bill / reference no.' },
     S('Link to work'),
     { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' }, { name: 'client_id', label: 'Client (if you re-bill it)', type: 'select', lookup: 'clients' },
+    { name: 'grant_id', label: 'Paid from grant', type: 'select', lookup: 'grants', help: 'Counts as grant money used.' }, { name: 'receipt_url', label: 'Receipt link', placeholder: 'Google Drive / Dropbox link' },
     { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
   ],
   accounts: () => [
@@ -147,6 +177,7 @@ const FORMS = {
     S('When & how much'),
     { name: 'renewal_date', label: 'Next renewal / billing date', type: 'date', required: true }, { name: 'cycle', label: 'Cycle', type: 'select', options: OPT.cycle, required: true, default: 'yearly' },
     { name: 'our_cost', label: 'We pay (₹)', type: 'money' }, { name: 'client_price', label: 'Client pays per cycle (₹)', type: 'money', help: 'Maintenance plans count as monthly recurring income.' },
+    { name: 'owner_id', label: 'Owner / paid by', type: 'select', lookup: 'users', blank: '— Company —' },
     { name: 'status', label: 'Status', type: 'select', options: [['active', 'Active'], ['lapsed', 'Lapsed'], ['cancelled', 'Cancelled']], required: true, default: 'active' }, { name: 'auto_renew', label: 'Renews automatically', type: 'checkbox' },
     { name: 'notes', label: 'Notes / what is covered', type: 'textarea', full: true, rows: 2 },
   ],
@@ -164,6 +195,13 @@ const FORMS = {
       { name: 'description', label: 'Details / what was done', type: 'textarea', full: true, rows: 3 },
     ];
   },
+  grants: () => [
+    { name: 'name', label: 'Grant / scheme', required: true, placeholder: 'e.g. State startup seed grant' }, { name: 'funder', label: 'Funder', placeholder: 'e.g. Incubator or government department' },
+    { name: 'status', label: 'Status', type: 'select', options: OPT.grantStatus, required: true, default: 'applied' }, { name: 'applied_on', label: 'Applied on', type: 'date' },
+    { name: 'requested', label: 'Amount requested (₹)', type: 'money' }, { name: 'received', label: 'Received so far (₹)', type: 'money' },
+    { name: 'next_report_date', label: 'Next report due', type: 'date', help: 'Shows on the calendar.' },
+    { name: 'notes', label: 'Notes / conditions', type: 'textarea', full: true, rows: 3 },
+  ],
   events: () => [
     { name: 'title', label: 'Title', required: true, full: true, placeholder: 'e.g. GST filing due' }, { name: 'date', label: 'Date', type: 'date', required: true }, { name: 'kind', label: 'Kind', type: 'select', options: OPT.eventKind, required: true },
     { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients' }, { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' }, { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },

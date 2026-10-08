@@ -6,7 +6,7 @@ const route = (path, handler, opts = {}) => ROUTES.push({ path, parts: path.spli
 const emptyMini = (t, ic, action) => `<div class="empty mini${ic ? ' iconic' : ''}">${ic ? `<span class="em-i">${icon(ic)}</span>` : ''}<span>${esc(t)}</span>${action || ''}</div>`;
 const listCard = (title, body, right) => panel(title, body, right);
 
-const STAGE_TONE = { new: 'var(--faint)', contacted: 'var(--blue)', meeting: '#5b7fd6', proposal: 'var(--accent)', negotiation: 'var(--plum)', won: 'var(--green)', lost: 'var(--red)' };
+const STAGE_TONE = { new: 'var(--faint)', contacted: 'var(--blue)', qualified: '#4f8fb8', meeting: '#5b7fd6', proposal: 'var(--accent)', negotiation: 'var(--plum)', won: 'var(--green)', closed: 'var(--muted)', lost: 'var(--red)', nurture: '#c47f17' };
 const TASK_TONE = { todo: 'var(--faint)', in_progress: 'var(--blue)', review: '#d99312', done: 'var(--green)' };
 
 /* ---------- generic kanban ---------- */
@@ -117,7 +117,7 @@ route('/dashboard', async ({ el }) => {
       panel('Projects in flight', d.my_projects.length ? `<div class="tbl-scroll"><table class="t"><tbody>${d.my_projects.map((p) => `<tr class="click" data-href="#/projects/${p.id}"><td><div class="who">${logoSq(p.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(p.name)}</div><div class="t2 ellipsis">${esc(p.client_name || '')}</div></div></div></td>
         <td>${badge(p.status)}</td><td><div class="prog"><div class="bar"><i style="width:${p.task_count ? Math.round(100 * p.tasks_done / p.task_count) : 0}%"></i></div>${p.task_count ? Math.round(100 * p.tasks_done / p.task_count) + '%' : '—'}</div></td><td class="num">${dueBadge(p.deadline)}</td><td style="width:40px">${p.manager_name ? avatar(p.manager_name, 'sm') : ''}</td></tr>`).join('')}</tbody></table></div>` : emptyMini('No active projects.', 'briefcase', '<a class="btn sm" href="#/projects">Projects</a>'), '<a href="#/projects">All projects</a>'),
     ];
-    const stages = OPT.leadStage.filter(([v]) => !['won', 'lost'].includes(v));
+    const stages = OPT.leadStage.filter(([v]) => !CLOSED_STAGES.includes(v));
     const pmax = Math.max(1, ...stages.map(([v]) => (d.pipeline[v] || {}).v || 0));
     const right = [
       panel('My tasks', d.my_tasks.length ? `<div class="list">${d.my_tasks.slice(0, 5).map((t) => taskLine(t)).join('')}</div>` : emptyMini('Nothing assigned to you. Enjoy the quiet.', 'check', '<a class="btn sm" href="#/tasks?scope=all">See the team board</a>'), '<a href="#/tasks">My work</a>'),
@@ -143,47 +143,66 @@ route('/dashboard', async ({ el }) => {
 }, { title: 'Home' });
 
 /* =====================================================  PIPELINE (LEADS)  ===================================================== */
-const leadCard = (l) => `<div class="t">${esc(l.company || l.name)}</div><div class="s">${esc(l.company ? l.name : '')}${l.service ? (l.company ? ' · ' : '') + esc(l.service) : ''}</div>
-  <div class="f"><b class="tnum">${l.value ? money(l.value) : '<span class="faint">No value</span>'}</b><span class="grow"></span>${!['won', 'lost'].includes(l.stage) && l.next_followup ? dueBadge(l.next_followup) : ''}${l.owner_name ? avatar(l.owner_name, 'sm') : ''}</div>`;
+const leadCard = (l) => `<div class="t">${esc(l.company || l.name)}</div><div class="s">${esc(l.company && l.company !== l.name ? l.name : '')}${l.department ? (l.company && l.company !== l.name ? ' · ' : '') + esc(l.department) : ''}</div>
+  <div class="f">${heat(l.priority)}<b class="tnum" style="margin-left:6px">${l.value ? compact(l.value) : ''}</b><span class="grow"></span>${!CLOSED_STAGES.includes(l.stage) && l.next_followup ? dueBadge(l.next_followup) : ''}${l.owner_name ? avatar(l.owner_name, 'sm') : ''}</div>`;
 
 async function moveLead(id, stage, after) {
   try {
     const body = { stage };
-    if (stage === 'lost') { const r = await promptBox('Mark as lost', 'What was the reason? It helps spot patterns later.', ''); if (r === null) return after(); if (r) body.lost_reason = r; }
+    if (stage === 'lost' || stage === 'closed') { const r = await promptBox(stage === 'lost' ? 'Mark as lost' : 'Close this lead', 'What was the reason? It helps spot patterns later.', ''); if (r === null) return after(); if (r) body.lost_reason = r; }
     await PUT('/leads/' + id, body); toast(`Moved to ${STATUS_LABEL[stage] || pretty(stage)}`);
   } catch (e) { fail(e); }
   after();
 }
 
-route('/leads', async ({ el }) => {
+// the same filters drive the board and the list: department / product, priority, market, owner, search
+const LEAD_FILTERS = [['department', 'Department / product', () => OPT.leadDept], ['priority', 'Priority', () => OPT.leadPriority], ['market', 'Market', () => OPT.market], ['owner_id', 'Assigned to', () => App.lookups.users.map((u) => [u.id, u.name])], ['source', 'Source', () => OPT.leadSource]];
+
+route('/leads', async ({ el, query }) => {
   const view = localStorage.getItem('leadView') || 'board';
-  const leads = await GET('/leads');
-  const open = leads.filter((l) => !['won', 'lost'].includes(l.stage));
+  const all = await GET('/leads');
+  const f = {}; for (const [k] of LEAD_FILTERS) if (query[k]) f[k] = query[k];
+  const showClosed = query.closed === '1';
+  const q = String(query.q || '').toLowerCase();
+  const leads = all.filter((l) => Object.entries(f).every(([k, v]) => String(l[k] ?? '') === String(v)) && (!q || [l.name, l.company, l.phone, l.email, l.city, l.requirement, l.notes].join(' ').toLowerCase().includes(q)));
+  const open = leads.filter((l) => !CLOSED_STAGES.includes(l.stage));
   const won = leads.filter((l) => l.stage === 'won');
-  const winRate = won.length + leads.filter((l) => l.stage === 'lost').length ? Math.round(100 * won.length / (won.length + leads.filter((l) => l.stage === 'lost').length)) : null;
+  const weighted = open.reduce((s, l) => s + (l.value || 0) * (STAGE_PROB[l.stage] || 0) / 100, 0);
+  const due = open.filter((l) => l.next_followup && l.next_followup <= todayStr()).length;
   el.innerHTML = pageHead('Pipeline', '', `<div class="seg"><button class="${view === 'board' ? 'on' : ''}" data-v="board">Board</button><button class="${view === 'list' ? 'on' : ''}" data-v="list">List</button></div>
     ${isFounder() ? `<button class="btn" id="implead">${icon('upload')}Import</button>` : ''}<button class="btn primary" id="addlead">${icon('plus')}New lead</button>`, '<b>Pipeline</b>')
-    + `<div class="pt"><div><h1>Pipeline</h1><div class="sub">${plural(open.length, 'open deal')} worth <b style="color:var(--ink)">${money(open.reduce((s, l) => s + (l.value || 0), 0))}</b>${winRate !== null ? ` · ${winRate}% win rate` : ''} · ${open.filter((l) => l.next_followup && l.next_followup <= todayStr()).length} follow-ups due</div></div></div><div id="lead-body"></div>`;
+    + `<div class="pt"><div><h1>Pipeline</h1><div class="sub">${plural(open.length, 'open lead')} · pipeline <b style="color:var(--ink)">${money(open.reduce((s, l) => s + (l.value || 0), 0))}</b> · weighted ${money(weighted)} · ${leads.length ? Math.round(100 * won.length / leads.length) : 0}% converted · <a href="#/followups">${plural(due, 'follow-up')} due</a></div></div></div>
+    <div class="toolbar lead-tb"><input type="search" id="lq" placeholder="Search name, company, phone…" value="${esc(query.q || '')}" aria-label="Search leads">
+      ${LEAD_FILTERS.map(([k, label, opts]) => `<select data-lf="${k}" aria-label="${esc(label)}"><option value="">${esc(label)}</option>${normOpts(opts()).map((o) => `<option value="${esc(o.v)}" ${String(f[k]) === String(o.v) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`).join('')}
+      ${view === 'board' ? `<label class="check" style="margin-left:auto"><input type="checkbox" id="lclosed" ${showClosed ? 'checked' : ''}><span>Show closed &amp; lost</span></label>` : ''}</div><div id="lead-body"></div>`;
+  const go = (extra = {}) => { const p = new URLSearchParams(); $$('[data-lf]', el).forEach((s) => s.value && p.set(s.dataset.lf, s.value)); const qv = $('#lq', el).value.trim(); if (qv) p.set('q', qv); if ($('#lclosed', el) && $('#lclosed', el).checked) p.set('closed', '1'); Object.entries(extra).forEach(([k, v]) => p.set(k, v)); location.hash = '#/leads' + (p.toString() ? '?' + p : ''); };
+  $$('[data-lf]', el).forEach((s) => s.addEventListener('change', () => go()));
+  $('#lq', el).addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  $('#lq', el).addEventListener('search', () => go());
+  if ($('#lclosed', el)) $('#lclosed', el).addEventListener('change', () => go());
   $$('[data-v]', el).forEach((b) => b.addEventListener('click', () => { localStorage.setItem('leadView', b.dataset.v); Router.refresh(); }));
-  $('#addlead', el).addEventListener('click', () => editRecord('leads', null, { owner_id: App.user.id }, () => Router.refresh(), { label: 'lead' }));
+  $('#addlead', el).addEventListener('click', () => editRecord('leads', null, { owner_id: App.user.id, department: f.department || '' }, () => Router.refresh(), { label: 'lead', size: 'wide' }));
   const il = $('#implead', el); if (il) il.addEventListener('click', () => importModal('leads', () => Router.refresh()));
   const body = $('#lead-body', el);
   if (view === 'list') {
     mountList(body, {
-      resource: 'leads', rows: async () => leads, searchPlaceholder: 'Search deals…', defaultSort: { key: 'created_at', dir: 'desc' }, noun: 'lead',
-      filters: [{ key: 'stage', label: 'Stage', options: OPT.leadStage }, { key: 'owner_id', label: 'Owner', lookup: 'users' }, { key: 'source', label: 'Source', options: OPT.leadSource }],
+      resource: 'leads', rows: async () => leads, search: false, defaultSort: { key: 'created_at', dir: 'desc' }, noun: 'lead',
+      filters: [{ key: 'stage', label: 'Stage', options: OPT.leadStage }, { key: 'followup_round', label: 'Follow-up round', options: OPT.followRound }],
       columns: [
-        { key: 'company', label: 'Deal', render: (r) => `<div class="who">${logoSq(r.company || r.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.company || r.name)}</div><div class="t2 ellipsis">${esc(r.company ? r.name : '')}</div></div></div>` },
-        { key: 'stage', label: 'Stage', render: (r) => badge(r.stage) }, { key: 'value', label: 'Value', num: true, render: (r) => (r.value ? money(r.value) : '<span class="faint">—</span>') },
-        { key: 'service', label: 'Interested in', render: (r) => esc(r.service || '—') }, { key: 'next_followup', label: 'Follow-up', render: (r) => (['won', 'lost'].includes(r.stage) ? '<span class="faint">—</span>' : dueBadge(r.next_followup)) },
-        { key: 'owner_name', label: 'Owner', render: (r) => who(r.owner_name) }, { key: 'source', label: 'Source', render: (r) => `<span class="muted">${esc(r.source || '—')}</span>` },
+        { key: 'company', label: 'Lead', render: (r) => `<div class="who">${logoSq(r.company || r.name, 'sm')}<div style="min-width:0"><div class="t1 ellipsis">${esc(r.company || r.name)}</div><div class="t2 ellipsis">${esc([r.company && r.company !== r.name ? r.name : '', r.phone].filter(Boolean).join(' · '))}</div></div></div>` },
+        { key: 'department', label: 'Dept / product', render: (r) => `${esc(r.department || '—')}<div class="t2">${esc(r.category || '')}</div>` },
+        { key: 'stage', label: 'Stage', render: (r) => badge(r.stage) }, { key: 'priority', label: 'Priority', sort: (r) => ({ hot: 0, medium: 1, cold: 2 })[r.priority], render: (r) => heat(r.priority) },
+        { key: 'value', label: 'Value', num: true, render: (r) => (r.value ? money(r.value) : '<span class="faint">—</span>') },
+        { key: 'next_followup', label: 'Follow-up', render: (r) => (CLOSED_STAGES.includes(r.stage) ? '<span class="faint">—</span>' : `${dueBadge(r.next_followup)}<div class="t2">${esc(ROUND_LABEL[r.followup_round] || '')}</div>`) },
+        { key: 'owner_name', label: 'Assigned', render: (r) => who(r.owner_name) }, { key: 'source', label: 'Source', render: (r) => `<span class="muted">${esc(r.source || '—')}</span>` },
       ],
-      onRow: (r) => (location.hash = '#/leads/' + r.id), empty: { title: 'No leads yet', text: 'Add the enquiries you are working on.' },
+      onRow: (r) => (location.hash = '#/leads/' + r.id), empty: { title: all.length ? 'No leads match' : 'No leads yet', text: all.length ? 'Clear a filter to see more.' : 'Add the enquiries you are working on, or import your sheet from Settings.' },
     });
-  } else if (!leads.length) {
-    body.innerHTML = '<div class="panel"><div class="empty"><b>Your pipeline is empty</b>Add the enquiries you are working on with New lead, or bring them in from Excel with Import.</div></div>';
+  } else if (!all.length) {
+    body.innerHTML = '<div class="panel"><div class="empty"><b>Your pipeline is empty</b>Add the enquiries you are working on with New lead, or bring your Google Sheet in from Settings → Move from Google Sheets.</div></div>';
   } else {
-    kanban(body, { cols: OPT.leadStage.map(([v, l]) => ({ v, l, c: STAGE_TONE[v] })), items: leads, group: (l) => l.stage, card: leadCard,
+    const cols = OPT.leadStage.filter(([v]) => showClosed || !['closed', 'lost'].includes(v));
+    kanban(body, { cols: cols.map(([v, l]) => ({ v, l, c: STAGE_TONE[v] })), items: leads, group: (l) => l.stage, card: leadCard,
       head: (list) => (list.length ? compact(list.reduce((s, l) => s + (l.value || 0), 0)) : ''), onOpen: (id) => (location.hash = '#/leads/' + id), onMove: (id, st) => moveLead(id, st, () => Router.refresh()) });
   }
 }, { title: 'Pipeline', needs: 'leads' });
@@ -192,22 +211,29 @@ route('/leads/:id', async ({ el, params, query }) => {
   const l = await GET('/leads/' + params.id); const tab = query.tab || 'activity'; const f = isFounder();
   const tabs = [{ key: 'activity', label: 'Activity' }, { key: 'tasks', label: 'Tasks' }, { key: 'files', label: 'Files' }, ...(f ? [{ key: 'quotes', label: 'Quotations' }] : [])];
   const days = Math.max(0, Math.round((Date.now() - new Date(String(l.created_at).replace(' ', 'T') + 'Z')) / 86400000));
-  el.innerHTML = pageHead(esc(l.name), '', `${f && !l.client_id && l.stage !== 'lost' ? `<button class="btn accent" id="convert">${icon('check')}Convert to client</button>` : ''}${f ? `<a class="btn" href="#/quotes/new?lead=${l.id}">New quotation</a>` : ''}<button class="btn" id="edit">${icon('edit')}Edit</button>`, `<a href="#/leads">Pipeline</a> / ${esc(l.company || l.name)}`)
-    + `<div class="record"><div class="record-main"><div class="rec-head">${logoSq(l.company || l.name)}<div><h1>${esc(l.company || l.name)}</h1><div class="meta">${badge(l.stage)}${l.company ? `<span>${esc(l.name)}</span>` : ''}${l.source ? `<span>via ${esc(l.source)}</span>` : ''}${l.client_id ? `<a href="#/clients/${l.client_id}">Now a client →</a>` : ''}</div></div></div>
-      <div class="highlights">${hl('Deal value', l.value ? money(l.value) : '—', esc(l.service || ''))}${hl('Next follow-up', l.next_followup ? fshort(l.next_followup) : '—', l.next_followup ? (daysUntil(l.next_followup) < 0 ? `<span class="neg">${-daysUntil(l.next_followup)} days late</span>` : daysUntil(l.next_followup) === 0 ? 'Today' : `in ${daysUntil(l.next_followup)} days`) : 'Not scheduled', l.next_followup && daysUntil(l.next_followup) < 0 && !['won', 'lost'].includes(l.stage) ? 'bad' : '')}
-        ${hl('Expected close', l.expected_close ? fshort(l.expected_close) : '—')}${hl('In pipeline', plural(days, 'day'), `since ${fshort(l.created_at)}`)}</div>
+  const closed = CLOSED_STAGES.includes(l.stage);
+  const fu = l.next_followup ? (daysUntil(l.next_followup) < 0 ? `<span class="neg">${-daysUntil(l.next_followup)} days late</span>` : daysUntil(l.next_followup) === 0 ? 'Today' : `in ${daysUntil(l.next_followup)} days`) : 'Not scheduled';
+  const wa = l.phone ? String(l.phone).replace(/\D/g, '') : '';
+  el.innerHTML = pageHead(esc(l.name), '', `${!closed ? `<button class="btn" id="logc">${icon('phone')}Log contact</button>` : ''}${f && !l.client_id && !['lost', 'closed'].includes(l.stage) ? `<button class="btn accent" id="convert">${icon('check')}Convert to client</button>` : ''}${f ? `<a class="btn" href="#/quotes/new?lead=${l.id}">New quotation</a>` : ''}<button class="btn" id="edit">${icon('edit')}Edit</button>`, `<a href="#/leads">Pipeline</a> / ${esc(l.company || l.name)}`)
+    + `<div class="record"><div class="record-main"><div class="rec-head">${logoSq(l.company || l.name)}<div><h1>${esc(l.company || l.name)}</h1><div class="meta">${badge(l.stage)}${heat(l.priority)}${l.company && l.company !== l.name ? `<span>${esc(l.name)}</span>` : ''}${l.department ? `<span>${esc(l.department)}${l.business_side ? ` · ${esc(l.business_side)}` : ''}</span>` : ''}${l.client_id ? `<a href="#/clients/${l.client_id}">Now a client →</a>` : ''}</div></div></div>
+      <div class="highlights">${hl('Deal value', l.value ? money(l.value) : '—', `${l.probability || 0}% likely · weighted ${money((l.value || 0) * (l.probability || 0) / 100)}`)}${hl('Next follow-up', l.next_followup && !closed ? fshort(l.next_followup) : '—', closed ? 'Deal ended' : fu, l.next_followup && !closed && daysUntil(l.next_followup) < 0 ? 'bad' : '')}
+        ${hl('Follow-up round', ROUND_LABEL[l.followup_round] || '—', l.last_contact ? `last contact ${fshort(l.last_contact)}` : 'no contact logged')}${hl(closed ? 'Closed on' : 'In pipeline', closed ? (l.closed_on ? fshort(l.closed_on) : '—') : plural(days, 'day'), closed ? '' : `since ${fshort(l.created_at)}`)}</div>
+      ${l.next_action && !closed ? `<div class="callout info next-act"><b>Next action:</b> ${esc(l.next_action)}</div>` : ''}
       ${tabsHtml(tabs, tab, '#/leads/' + l.id)}<div id="tab"></div></div>
-      <aside class="record-side">${propsSec('Deal', `${prop('Stage', `<select id="stg">${OPT.leadStage.map(([v, n]) => `<option value="${v}" ${v === l.stage ? 'selected' : ''}>${n}</option>`).join('')}</select>`)}${prop('Value', l.value ? money(l.value) : '')}${prop('Interested in', esc(l.service || ''))}${prop('Source', esc(l.source || ''))}${prop('Owner', l.owner_name ? who(l.owner_name) : '')}${l.lost_reason ? prop('Lost because', esc(l.lost_reason)) : ''}`)}
-        ${propsSec('Contact', `${prop('Name', esc(l.name))}${prop('Email', l.email ? `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>` : '')}${prop('Phone', l.phone ? `<a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>` : '')}${prop('City', esc(l.city || ''))}${prop('Website', l.website ? extLink(l.website) : '')}`)}
-        ${propsSec('Requirements', `<div class="doc-text pre">${l.notes ? esc(l.notes) : '<span class="faint">Nothing written yet.</span>'}</div>`)}</aside></div>`;
+      <aside class="record-side">${propsSec('Deal', `${prop('Stage', `<select id="stg" aria-label="Sales stage">${OPT.leadStage.map(([v, n]) => `<option value="${v}" ${v === l.stage ? 'selected' : ''}>${n}</option>`).join('')}</select>`)}${prop('Priority', heat(l.priority))}${prop('Department / product', esc(l.department || ''))}${prop('Business side', esc(l.business_side || ''))}${prop('Category', esc(l.category || ''))}${prop('Source', esc(l.source || ''))}${prop('Assigned to', l.owner_name ? who(l.owner_name) : '')}
+          ${prop('Meeting / demo', l.meeting_date ? fdate(l.meeting_date) : '')}${prop('Proposal sent', l.proposal_date ? fdate(l.proposal_date) : '')}${l.lost_reason ? prop(l.stage === 'won' ? 'Note' : 'Lost / closed because', esc(l.lost_reason)) : ''}`)}
+        ${propsSec('Contact', `${prop('Name', esc(l.name))}${prop('Phone', l.phone ? `<a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${wa.length >= 10 ? ` · <a href="https://wa.me/${wa.length === 10 ? '91' + wa : wa}" target="_blank" rel="noopener noreferrer">WhatsApp</a>` : ''}` : '')}${prop('Email', l.email ? `<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>` : '')}${prop('City', esc(l.city || ''))}${prop('Country', esc([l.country, l.market && l.market !== l.country ? l.market : ''].filter(Boolean).join(' · ')))}${prop('Website', l.website ? extLink(l.website) : '')}`)}
+        ${propsSec('Requirement', `<div class="doc-text pre">${l.requirement ? esc(l.requirement) : '<span class="faint">Nothing written yet.</span>'}</div>`)}
+        ${l.notes ? propsSec('Notes', `<div class="doc-text pre">${esc(l.notes)}</div>`) : ''}</aside></div>`;
   const t = $('#tab', el);
-  $('#edit', el).addEventListener('click', () => editRecord('leads', l, null, () => Router.refresh(), { label: 'lead', afterDelete: () => (location.hash = '#/leads') }));
+  $('#edit', el).addEventListener('click', () => editRecord('leads', l, null, () => Router.refresh(), { label: 'lead', size: 'wide', afterDelete: () => (location.hash = '#/leads') }));
   $('#stg', el).addEventListener('change', (e) => moveLead(l.id, e.target.value, () => Router.refresh()));
+  const lc = $('#logc', el); if (lc) lc.addEventListener('click', () => logContactModal(l, () => Router.refresh()));
   const cv = $('#convert', el);
   if (cv) cv.addEventListener('click', () => {
-    const m = openModal({ title: 'Convert to client', sub: l.company || l.name, body: `<p class="muted">Creates a client for <b style="color:var(--ink)">${esc(l.company || l.name)}</b>, adds ${esc(l.name)} as the main contact, and carries over notes, files and quotations.</p>
+    const m = openModal({ title: 'Convert to client', sub: l.company || l.name, body: `<p class="muted">Creates a client for <b style="color:var(--ink)">${esc(l.company || l.name)}</b>, adds ${esc(l.name)} as the main contact, and carries over notes, files and quotations. The lead is marked Converted.</p>
       <label class="check" style="margin-top:18px"><input type="checkbox" id="cp" checked><span>Also start a project for this deal</span></label>
-      <label class="f" style="margin-top:14px"><span>Project name</span><input id="pn" value="${esc((l.company || l.name) + ' — ' + (l.service || 'Project'))}"></label>`,
+      <label class="f" style="margin-top:14px"><span>Project name</span><input id="pn" value="${esc((l.company || l.name) + ' — ' + (l.department || l.service || 'Project'))}"></label>`,
       footer: '<button class="btn" data-close>Cancel</button><button class="btn accent" id="go">Convert</button>' });
     $('#go', m.el).addEventListener('click', async () => { try { const r = await POST(`/leads/${l.id}/convert`, { create_project: $('#cp', m.el).checked, project_name: $('#pn', m.el).value }); await refreshLookups(); m.close(); toast('Client created'); location.hash = '#/clients/' + r.client_id; } catch (e) { fail(e); } });
   });
