@@ -96,7 +96,9 @@ const FORMS = {
     const limited = intern && rec;      // interns can only move/describe their own tasks
     return [
       { name: 'title', label: 'Task', required: true, full: true, readonly: limited, placeholder: 'e.g. Build the contact form' },
-      { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' }, { name: 'assignee_id', label: 'Assign to', type: 'select', lookup: 'users', default: intern ? App.user.id : '' },
+      { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' },
+      // founders hand work to one or more people; an intern's own task is always theirs
+      ...(intern ? [] : [{ name: 'assignee_ids', label: 'People on this task', type: 'people', lookup: 'users', full: true, help: 'Pick everyone working on it. They can all update the status, tick the checklist and join the discussion.' }]),
       { name: 'status', label: 'Status', type: 'select', options: OPT.taskStatus, required: true, default: 'todo' }, { name: 'priority', label: 'Priority', type: 'select', options: OPT.priority, required: true, default: 'medium' },
       { name: 'due_date', label: 'Due date', type: 'date' },
       { name: 'description', label: 'Details / instructions', type: 'textarea', full: true, rows: 4 },

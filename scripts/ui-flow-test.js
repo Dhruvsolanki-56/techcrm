@@ -9,6 +9,10 @@
   const top = () => [...document.querySelectorAll('.overlay')].pop();
   const finish = () => document.getAnimations().forEach((a) => { try { a.finish(); } catch { /* */ } });
   const set = (ov, name, value) => {
+    if (Array.isArray(value)) {       // people picker: tick exactly these ids
+      const boxes = [...ov.querySelectorAll(`[name="${name}"]`)]; if (!boxes.length) throw new Error(`field ${name} missing`);
+      boxes.forEach((b) => { b.checked = value.map(String).includes(b.value); b.dispatchEvent(new Event('change', { bubbles: true })); }); return value;
+    }
     const el = ov.querySelector(`[name="${name}"]`); if (!el) throw new Error(`field ${name} missing`);
     if (el.type === 'checkbox') el.checked = !!value; else el.value = value;
     el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
@@ -69,7 +73,7 @@
   const project = App.lookups.projects.find((p) => p.name === T + ' Website');
   const acc = accounts[0];
   const rest = [
-    ['tasks', { title: T + ' task: build contact form', project_id: project.id, assignee_id: App.user.id, status: 'todo', priority: 'urgent', due_date: plus(2), description: 'Use the new API' }, (r) => r.title === T + ' task: build contact form'],
+    ['tasks', { title: T + ' task: build contact form', project_id: project.id, status: 'todo', priority: 'urgent', due_date: plus(2), description: 'Use the new API' }, (r) => r.title === T + ' task: build contact form'],
     ['payments', { amount: 50000, date: today, client_id: client.id, tds: 1000, project_id: project.id, account_id: acc.id, method: ov1(OPT.payMethod), reference: 'UTR123456', notes: 'Advance' }, (r) => r.reference === 'UTR123456'],
     ['expenses', { amount: 11800, date: today, category: ov1(OPT.expenseCategory), vendor: 'Hosting Co', description: T + ' server', status: 'paid', tax_amount: 1800, account_id: acc.id, method: ov1(OPT.payMethod), reference: 'BILL-77', project_id: project.id, client_id: client.id, notes: 'Yearly' }, (r) => r.description === T + ' server'],
     ['accounts', { name: T + ' Cash box', type: ov1(OPT.accountType), opening_balance: 2500, active: true, notes: 'Petty cash' }, (r) => r.name === T + ' Cash box'],
@@ -86,7 +90,26 @@
   { const t = await latest('tasks', (r) => r.title.startsWith(T)); openTask(t, () => {}); await sleep(500); finish(); const ov = top();
     const done = [...ov.querySelectorAll('button')].find((b) => /Mark done/.test(b.textContent)); done.click(); await sleep(700);
     ok((await GET('/tasks/' + t.id)).status === 'done', 'task popup: "Mark done" updates the task'); await closeAll();
-    editRecord('tasks', await GET('/tasks/' + t.id), null, () => {}, { label: 'task' }); await sleep(300); finish(); set(top(), 'status', 'in_progress'); const msg = await save(); ok(!msg && (await GET('/tasks/' + t.id)).status === 'in_progress', 'task: edit and save changes'); }
+    editRecord('tasks', await GET('/tasks/' + t.id), null, () => {}, { label: 'task' }); await sleep(300); finish(); set(top(), 'status', 'in_progress'); const msg = await save(); ok(!msg && (await GET('/tasks/' + t.id)).status === 'in_progress', 'task: edit and save changes');
+    // teamwork: put two people on it, split the work, discuss with an @mention
+    const mate = App.lookups.users.find((u) => u.id !== App.user.id);
+    editRecord('tasks', await GET('/tasks/' + t.id), null, () => {}, { label: 'task' }); await sleep(300); finish();
+    set(top(), 'assignee_ids', [App.user.id, mate.id]); const m2 = await save();
+    const t2 = await GET('/tasks/' + t.id); ok(!m2 && t2.assignees.map((a) => a.id).sort().join() === [App.user.id, mate.id].sort().join(), 'task: two people picked in the form are both on the task', t2.assignees);
+    openTask(t2, () => {}); await waitFor(() => top() && top().querySelector('#ck-new')); finish(); const tv = top();
+    tv.querySelector('#ck-new').value = 'ZZ step for ' + mate.name; const who = tv.querySelector('#ck-new-who'); ok(!!who, 'checklist: can pick who does a step when several people are on the task'); if (who) who.value = String(mate.id);
+    tv.querySelector('.ck-add button').click(); await waitFor(() => tv.querySelector('.ck'));
+    ok(tv.querySelectorAll('.ck').length === 1 && tv.querySelector('.ck .ck-who').value === String(mate.id), 'checklist: step added for a teammate');
+    tv.querySelector('[data-tick]').click(); await waitFor(() => tv.querySelector('.ck.done'));
+    ok(tv.querySelector('#ck-sum').textContent === '1 of 1 done', 'checklist: ticking updates progress');
+    const ta = tv.querySelector('#th-body'); ta.focus(); ta.value = '@' + mate.name.slice(0, 3).toLowerCase(); ta.setSelectionRange(ta.value.length, ta.value.length); ta.dispatchEvent(new Event('input'));
+    const opt = await waitFor(() => [...tv.querySelectorAll('.mp-i')].find((b) => b.textContent.includes(mate.name))); ok(!!opt, 'comment: typing @ suggests teammates');
+    if (opt) opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    ta.value += 'please review'; tv.querySelector('#th-post').click(); await waitFor(() => tv.querySelector('.th-c .mention'));
+    const n = (await GET('/notes?entity_type=task&entity_id=' + t.id)).find((x) => x.kind === 'note');
+    ok(n && n.body === '@' + mate.name + ' please review' && JSON.parse(n.mentions || '[]')[0]?.id === mate.id, 'comment: mention is saved and highlighted', n);
+    tv.querySelector('#tk-tabs [data-tab=history]').click(); ok([...tv.querySelectorAll('.th-log')].some((x) => /added/.test(x.textContent)) && [...tv.querySelectorAll('.th-log')].some((x) => /changed status/.test(x.textContent)), 'history tab lists who was added and status changes');
+    await closeAll(); }
 
   // ---------- 3. invoice editor: fill lines, save as sent, record payment ----------
   location.hash = `#/invoices/new?client=${client.id}`; await sleep(1200); finish();

@@ -73,7 +73,7 @@ function lineChart(series, { h = 200, labels, fmt = compact } = {}) {
 
 /* =====================================================  HOME  ===================================================== */
 const taskLine = (t, showWho) => `<div class="li" data-task="${t.id}" style="cursor:pointer"><button class="check-btn" data-done="${t.id}" title="Mark as done" aria-label="Mark ${esc(t.title)} as done"></button>
-  <div class="grow"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.project_name || 'No project')}${showWho && t.assignee_name ? ' · ' + esc(t.assignee_name) : ''}</div></div>${PRIORITY[t.priority] >= 3 ? prio(t.priority) : ''}${dueBadge(t.due_date)}</div>`;
+  <div class="grow"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.project_name || 'No project')}${showWho && t.assignees && t.assignees.length ? ' · ' + esc(peopleNames(t.assignees)) : ''}${t.comment_count ? ` · ${t.comment_count} comment${t.comment_count === 1 ? '' : 's'}` : ''}</div></div>${PRIORITY[t.priority] >= 3 ? prio(t.priority) : ''}${dueBadge(t.due_date)}</div>`;
 
 async function completeTask(id, after) {
   try { await PUT('/tasks/' + id, { status: 'done' }); toast('Nice — task marked as done'); if (after) after(); } catch (e) { fail(e); }
@@ -335,14 +335,14 @@ route('/projects/:id', async ({ el, params, query }) => {
 /* =====================================================  TASKS  ===================================================== */
 function taskColumns() {
   return [
-    { key: 'title', label: 'Task', render: (r) => `<div class="t1">${esc(r.title)}</div><div class="t2">${esc(r.project_name || 'No project')}</div>` },
+    { key: 'title', label: 'Task', render: (r) => `<div class="t1">${esc(r.title)}</div><div class="t2">${taskKey(r.id)} · ${esc(r.project_name || 'No project')}${r.check_total ? ` · ${r.check_done}/${r.check_total} steps` : ''}${r.comment_count ? ` · ${r.comment_count} comments` : ''}</div>` },
     { key: 'status', label: 'Status', render: (r) => badge(r.status) }, { key: 'priority', label: 'Priority', render: (r) => prio(r.priority) },
-    { key: 'assignee_name', label: 'Assignee', render: (r) => who(r.assignee_name) },
+    { key: 'assignee_name', label: 'People', render: (r) => ((r.assignees || []).length > 1 ? `<span class="who">${avStack(r.assignees)}<span class="ellipsis">${esc(r.assignees.map((a) => a.name.split(' ')[0]).join(', '))}</span></span>` : who(r.assignee_name)) },
     { key: 'due_date', label: 'Due', render: (r) => dueBadge(r.due_date, r.status === 'done') },
   ];
 }
-const taskCard = (t) => `<div class="t">${esc(t.title)}</div><div class="s">${esc(t.project_name || 'No project')}</div>
-  <div class="f">${prio(t.priority)}<span class="grow"></span>${t.due_date ? dueBadge(t.due_date, t.status === 'done') : ''}${t.assignee_name ? avatar(t.assignee_name, 'sm') : ''}</div>`;
+const taskCard = (t) => `<div class="t">${esc(t.title)}</div><div class="s"><span class="tkey">${taskKey(t.id)}</span> ${esc(t.project_name || 'No project')}</div>
+  <div class="f">${prio(t.priority)}${t.check_total ? `<span class="meta-i ${t.check_done === t.check_total ? 'ok' : ''}" title="Checklist: ${t.check_done} of ${t.check_total} done">${icon('check')}${t.check_done}/${t.check_total}</span>` : ''}${t.comment_count ? `<span class="meta-i" title="${plural(t.comment_count, 'comment')}">${icon('chat')}${t.comment_count}</span>` : ''}<span class="grow"></span>${t.due_date ? dueBadge(t.due_date, t.status === 'done') : ''}${avStack(t.assignees)}</div>`;
 
 async function taskBoard(root, query) {
   const draw = async () => {
@@ -354,24 +354,6 @@ async function taskBoard(root, query) {
       onMove: async (id, st) => { try { await PUT('/tasks/' + id, { status: st }); } catch (e) { fail(e); } draw(); } });
   };
   try { await draw(); } catch (e) { fail(e); }
-}
-
-function openTask(t, after) {
-  const mine = isFounder() || t.assignee_id === App.user.id || t.created_by === App.user.id;
-  const m = openModal({ title: t.title, sub: [t.project_name || 'No project', t.client_name].filter(Boolean).join(' · '), size: 'xl', body: `<div class="pop-split">
-    <div class="pop-main">${t.description ? `<div class="doc-text pre">${esc(t.description)}</div>` : '<div class="faint">No details written for this task.</div>'}
-      <div class="pop-sec"><h3>Discussion</h3><div id="tk-notes"></div></div><div class="pop-sec"><h3>Files</h3><div id="tk-files"></div></div></div>
-    <aside class="pop-side">${prop('Status', mine ? `<select id="tk-st">${OPT.taskStatus.map(([v, l]) => `<option value="${v}" ${v === t.status ? 'selected' : ''}>${l}</option>`).join('')}</select>` : badge(t.status))}${prop('Priority', prio(t.priority))}${prop('Assignee', who(t.assignee_name))}
-      ${prop('Project', t.project_id ? `<a href="#/projects/${t.project_id}" data-close-link>${esc(t.project_name)}</a>` : '')}${prop('Due', t.due_date ? `${dueBadge(t.due_date, t.status === 'done')}${t.status !== 'done' && Math.abs(daysUntil(t.due_date)) > 1 ? `<div class="faint small">${daysUntil(t.due_date) < 0 ? plural(-daysUntil(t.due_date), 'day') + ' late' : 'in ' + plural(daysUntil(t.due_date), 'day')}</div>` : ''}` : '')}${prop('Created by', `${esc(t.creator_name || '—')}<div class="faint small">${fshort(t.created_at)}</div>`)}</aside></div>`,
-    footer: mine ? `<button class="btn" id="tk-edit">${icon('edit')}Edit task</button>${t.status !== 'done' ? `<button class="btn accent" id="tk-done">${icon('check')}Mark done</button>` : ''}` : '<button class="btn" data-close>Close</button>' });
-  m.body.classList.add('flush');
-  $$('[data-close-link]', m.el).forEach((a) => a.addEventListener('click', () => m.close()));
-  $$('[data-close]', m.foot || m.el).forEach((b) => b.addEventListener('click', () => m.close()));
-  notesPanel($('#tk-notes', m.el), 'task', t.id, { kinds: false, placeholder: 'Ask a question or post an update…' });
-  docsPanel($('#tk-files', m.el), 'task', t.id);
-  const st = $('#tk-st', m.el); if (st) st.addEventListener('change', async () => { try { await PUT('/tasks/' + t.id, { status: st.value }); toast('Status updated'); m.close(); if (after) after(); } catch (e) { fail(e); } });
-  const dn = $('#tk-done', m.el); if (dn) dn.addEventListener('click', () => { m.close(); completeTask(t.id, after); });
-  const ed = $('#tk-edit', m.el); if (ed) ed.addEventListener('click', () => { m.close(); editRecord('tasks', t, null, () => after && after(), { label: 'task' }); });
 }
 
 route('/tasks', async ({ el, query }) => {
@@ -386,6 +368,10 @@ route('/tasks', async ({ el, query }) => {
   const go = () => { const p = new URLSearchParams({ scope: 'all' }); if ($('#fa', el) && $('#fa', el).value) p.set('assignee', $('#fa', el).value); if ($('#fp', el).value) p.set('project', $('#fp', el).value); if (!p.get('assignee') && scope === 'mine' && !$('#fa', el)) p.set('scope', 'mine'); location.hash = '#/tasks?' + p; };
   if ($('#fa', el)) $('#fa', el).addEventListener('change', go); $('#fp', el).addEventListener('change', go);
   const body = $('#body', el);
+  if (query.open) {
+    const rest = new URLSearchParams(query); rest.delete('open'); history.replaceState(null, '', '#/tasks' + (rest.toString() ? '?' + rest : ''));
+    openTask({ id: query.open }, () => Router.refresh());
+  }
   if (view === 'board') taskBoard(body, q);
   else mountList(body, { resource: 'tasks', query: q, searchPlaceholder: 'Search tasks…', noun: 'task', filters: [{ key: 'status', label: 'Status', options: OPT.taskStatus }, { key: 'priority', label: 'Priority', options: OPT.priority }], columns: taskColumns(), onRow: (r) => openTask(r, () => Router.refresh()), empty: { title: 'No tasks', text: 'Create a task and assign it to someone.' } });
 }, { title: 'My work' });

@@ -26,7 +26,7 @@ The free Render server sleeps after 15 minutes without visitors, so the first vi
 ## Who sees what
 | | Founders | Interns |
 |---|---|---|
-| Home, calendar, tasks | everything | own tasks, projects they are added to |
+| Home, calendar, tasks | everything | tasks they are on (even outside their projects), projects they are added to |
 | Projects (specs, files, timeline) | all | only assigned projects (no money) |
 | Leads, all clients, all projects, maintenance log | all | only if a founder ticks it for that person |
 | Quotations, invoices, renewals & plans, finance | all | never |
@@ -39,6 +39,7 @@ New accounts get a temporary password and can do nothing until they choose their
 - **Pipeline** – board or list, follow-ups, call/meeting notes, *Convert to client (+ project)*.
 - **Clients** – details, GSTIN, contacts, projects, invoices & payments, files, credentials, support log, timeline.
 - **Projects** – scope/specs, links, team, task board, files, credentials, project profit.
+- **Tasks as team work** (the useful parts of Jira, nothing more) – put **several people** on one task; split it into a **checklist** where each step can belong to one of them; a **discussion** where typing **@** mentions a teammate; an automatic **history** (who changed status, due date, people…); **watchers** who get a bell notification for new comments and status changes (people on the task, the creator, anyone who comments or is mentioned — anyone can Watch/Unwatch). Every task has a short key like **T-12** you can search for, and notifications open the task directly. Interns on a task can move it, tick the checklist and discuss; only founders change who is on it. Teammates on the project who aren't on the task can read and comment but not change it.
 - **Quotations → Invoices** – GST (CGST+SGST / IGST), FY numbering, print/PDF, part-payments with TDS, auto *paid / overdue*, and a one-click **payment reminder** (copy, WhatsApp or email — ready-written with your bank/UPI details).
 - **Renewals & plans** – maintenance plans (AMC), domains, hosting, SSL, subscriptions; *Mark renewed* rolls the date. Active plans = your monthly recurring income.
 - **Maintenance** – support work log per client/project.

@@ -29,7 +29,7 @@ const daysUntil = (s) => Math.round((asDate(s) - asDate(todayStr())) / 86400000)
 const initials = (n) => String(n || '?').replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?';
 const pretty = (s) => (s ? String(s).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : '');
 const fsize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
-const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const plural = (n, w, many) => `${n} ${n === 1 ? w : many || w + 's'}`;
 const extLink = (u) => (u ? `<a class="ln" href="${esc(/^https?:\/\//.test(u) ? u : 'https://' + u)}" target="_blank" rel="noopener noreferrer">${esc(u.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</a>` : '<span class="faint">—</span>');
 
 /* soft, deterministic colour per name (avatars, client marks) */
@@ -82,6 +82,7 @@ const ICONS = {
   tool: '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-8 8-3-3-6.5 0V11.5L3 10l7-7 1.5 1.5"/><path d="M14.7 6.3 18 3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
   bell: '<path d="M6 10a6 6 0 1 1 12 0c0 4.5 1.6 6.2 2.4 7H3.6c.8-.8 2.4-2.5 2.4-7z"/><path d="M10 20.2a2.2 2.2 0 0 0 4 0"/>',
   inbox: '<path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -273,6 +274,10 @@ function fieldHtml(f, val) {
       input = `<select id="${id}" name="${f.name}">${f.required && !f.blank ? (f.lookup && (v == null || v === '') ? '<option value="" selected disabled hidden>Choose…</option>' : '') : `<option value="">${esc(f.blank || '—')}</option>`}${opts.map((o) => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`;
       break;
     }
+    case 'people': {
+      const on = new Set((Array.isArray(v) ? v : v ? [v] : []).map(String));
+      return `<div class="f ${f.full ? 'full' : ''}" role="group" aria-labelledby="${id}-l"><span id="${id}-l">${esc(f.label)}${f.required ? ' <i>*</i>' : ''}</span><div class="people-pick" id="${id}">${optionsFor(f).map((o) => `<label class="pp"><input type="checkbox" name="${f.name}" value="${esc(o.v)}" ${on.has(String(o.v)) ? 'checked' : ''}>${avatar(o.l, 'sm')}<span>${esc(o.l)}</span></label>`).join('')}</div><div class="f-err" id="${id}-err" role="alert"></div>${f.help ? `<div class="hint">${esc(f.help)}</div>` : ''}</div>`;
+    }
     case 'checkbox': return `<label class="check ${f.full ? 'full' : ''}"><input type="checkbox" id="${id}" name="${f.name}" ${v === 1 || v === true || v === '1' ? 'checked' : ''}><span>${esc(f.label)}${f.help ? `<div class="hint">${esc(f.help)}</div>` : ''}</span></label>`;
     case 'money': case 'number': input = `<input type="number" id="${id}" name="${f.name}"${ra} value="${esc(v)}" step="${f.step || (f.type === 'money' ? '0.01' : 'any')}" ${f.min !== undefined ? `min="${f.min}"` : ''} placeholder="${esc(f.placeholder || '')}">`; break;
     case 'password': input = `<input type="password" id="${id}" name="${f.name}" autocomplete="new-password" value="${esc(v)}" placeholder="${esc(f.placeholder || '')}">`; break;
@@ -282,7 +287,10 @@ function fieldHtml(f, val) {
 }
 function readForm(root, fields) {
   const out = {};
-  for (const f of fields) { const el = $(`[name="${f.name}"]`, root); if (!el) continue; out[f.name] = f.type === 'checkbox' ? el.checked : el.value; }
+  for (const f of fields) {
+    if (f.type === 'people') { if ($(`[name="${f.name}"]`, root)) out[f.name] = $$(`[name="${f.name}"]:checked`, root).map((i) => Number(i.value)); continue; }
+    const el = $(`[name="${f.name}"]`, root); if (!el) continue; out[f.name] = f.type === 'checkbox' ? el.checked : el.value;
+  }
   return out;
 }
 
@@ -304,7 +312,7 @@ function fieldProblem(el, label = labelOf(el)) {
 function validateForm(form, fields, data, res) {
   const out = [];
   for (const f of fields) {
-    if (!f.name || f.type === 'checkbox') continue; const el = $(`[name="${f.name}"]`, form); if (!el || el.disabled) continue;
+    if (!f.name || f.type === 'checkbox' || f.type === 'people') continue; const el = $(`[name="${f.name}"]`, form); if (!el || el.disabled) continue;
     const empty = data[f.name] == null || String(data[f.name]).trim() === '';
     const msg = f.required && empty ? `${f.label} is required.` : fieldProblem(el, f.label);
     fieldError(el, msg); if (msg) out.push({ el, label: f.label, msg });
@@ -373,6 +381,10 @@ function formModal({ title, sub, fields, values = {}, submit = 'Save', size, onS
 const LOOKUP_RESOURCES = new Set(['clients', 'projects', 'accounts', 'leads']);
 /* Open the create/edit form for any resource. Calls after(record) on success. */
 function editRecord(resource, rec, defaults, after, opts = {}) {
+  if (resource === 'tasks') {
+    if (rec) rec = { ...rec, assignee_ids: (rec.assignees || []).map((a) => a.id) };
+    else if (defaults && defaults.assignee_id && !defaults.assignee_ids) { const { assignee_id: a, ...rest } = defaults; defaults = { ...rest, assignee_ids: [a] }; }
+  }
   const fields = FORMS[resource](rec).map((f) => (f.name && !f.rule && RULES.kindFor(resource, f.name) ? { ...f, rule: RULES.kindFor(resource, f.name) } : f));
   const label = opts.label || resource.replace(/_/g, ' ').replace(/s$/, '');
   const canDelete = rec && (opts.canDelete !== undefined ? opts.canDelete : isFounder());
@@ -393,7 +405,7 @@ function editRecord(resource, rec, defaults, after, opts = {}) {
     },
   });
   if (resource === 'tasks' && rec && !isFounder()) {
-    for (const n of ['title', 'project_id', 'assignee_id', 'priority', 'due_date']) { const el = $(`[name="${n}"]`, m.el); if (el) el.disabled = true; }
+    for (const n of ['title', 'project_id', 'priority', 'due_date']) { const el = $(`[name="${n}"]`, m.el); if (el) el.disabled = true; }
     const note = document.createElement('p'); note.className = 'callout info'; note.style.marginBottom = '16px'; note.textContent = 'You can change the status and add progress details on your tasks.'; $('.form-grid', m.el).before(note);
   }
   return m;

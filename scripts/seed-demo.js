@@ -55,6 +55,20 @@ async function run() {
     ['Write UAT checklist', proj.acme, u.kabir, 'todo', 'low', ago(2), 'Overdue on purpose — shows red in the UI.'], ['Set up CI pipeline', proj.acme, u.rohan, 'done', 'medium', ago(10), ''],
     ['Product page QA on mobile', proj.green, u.tara, 'in_progress', 'high', inn(2), ''], ['Configure subscription app', proj.green, u.meera, 'todo', 'high', inn(3), ''], ['Monthly backup + plugin updates', proj.bright, u.kabir, 'todo', 'medium', inn(5), 'Take backup first. Update WP core + plugins on staging, then live.']])
     await call('POST', '/tasks', { title, project_id, assignee_id, status, priority, due_date, description });
+  // one task shared by two interns and a co-founder, with a split checklist and a short discussion
+  const shared = await call('POST', '/tasks', { title: 'Get Fleet portal ready for client handover', project_id: proj.acme, assignee_ids: [u.kabir, u.tara, u.rohan], status: 'in_progress', priority: 'high', due_date: inn(5),
+    description: 'Everything that has to be ready before Acme gets the portal. Each step has an owner. Tick yours as you finish and ask questions in the discussion below.' });
+  for (const [text, who, done] of [['Load test the live map with 200 vehicles', u.kabir, false], ['Fix marker flicker on Safari', u.kabir, true], ['Empty states and error screens', u.tara, false],
+    ['Final colour pass on dispatcher dashboard', u.tara, true], ['Set up production database backups', u.rohan, false], ['Write the handover note for Neha', null, false]]) {
+    const list = await call('POST', `/tasks/${shared.id}/checklist`, { text, assignee_id: who });
+    if (done) { const id = list[list.length - 1].id; await call('PUT', `/tasks/${shared.id}/checklist/${id}`, { done: true }); db.prepare('UPDATE task_checklist SET done_by=? WHERE id=?').run(who, id); }
+  }
+  const say = (who, body, hoursAgo, mentions) => db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body,mentions,created_at) VALUES('task',?,?,'note',?,?,datetime('now',?))")
+    .run(shared.id, who, body, mentions ? JSON.stringify(mentions) : null, `-${hoursAgo} hours`);
+  say(u.aarav, '@Kabir Singh can you run the 200-vehicle load test by Thursday? @Tara Nair the empty states are the last design piece.', 26, [{ id: u.kabir, name: 'Kabir Singh' }, { id: u.tara, name: 'Tara Nair' }]);
+  say(u.kabir, 'Yes. Safari flicker is fixed already. Starting the load test tomorrow morning.', 22);
+  say(u.tara, 'Empty states are 70% done. @Rohan Shah should the "no GPS signal" state show the last known position?', 5, [{ id: u.rohan, name: 'Rohan Shah' }]);
+  say(u.rohan, 'Yes, grey marker at the last position with the time it was seen.', 3);
 
   const leads = {};
   for (const [k, name, company, service, value, stage, source, follow] of [['l1', 'Rajesh Kumar', 'Kumar Textiles', 'E-commerce', 350000, 'proposal', 'Referral', ago(1)], ['l2', 'Priya Menon', 'Menon Dental Clinics', 'Website', 120000, 'meeting', 'Website', inn(2)],

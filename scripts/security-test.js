@@ -201,6 +201,71 @@ const newIp = () => `203.0.113.${ipSeq++}`;
   ok((await K.call('DELETE', '/notes/' + fNote.j.id)).s === 403, 'intern cannot delete a founder\'s note');
   ok((await raw('GET', '/files/' + up.j.id)).s === 401, 'file download needs a signed-in user');
 
+  { group('Task teamwork — several people, checklist, mentions, watchers');
+  const kId = db.prepare("SELECT id FROM users WHERE email='kabir@demo.test'").get().id;
+  const meeraId = db.prepare("SELECT id FROM users WHERE email='meera@demo.test'").get().id;
+  const notes = async (I) => (await I.call('GET', '/notifications')).j.items;
+  const seeded = (await F.call('GET', '/tasks')).j.find((x) => x.title.startsWith('Get Fleet portal ready'));
+  ok(seeded && seeded.assignees.length === 3 && seeded.check_total === 6 && seeded.check_done === 2 && seeded.comment_count === 4, 'demo has a shared task with 3 people, a checklist and a discussion', seeded);
+  // Tara is not on BrightPath, but being put on a task there lets her open it
+  const team = await F.call('POST', '/tasks', { title: 'Team task', project_id: bright.id, assignee_ids: [kId, tId], priority: 'high' });
+  ok(team.s === 201 && team.j.assignees.map((a) => a.id).join() === `${kId},${tId}` && team.j.assignee_id === kId, 'founder assigns one task to two interns (first one stays the main assignee)', team.j);
+  const tid = team.j.id; const link = `#/tasks?open=${tid}`;
+  ok((await notes(K)).some((n) => n.link === link && /assigned you T-/.test(n.text)) && (await notes(T)).some((n) => n.link === link), 'both interns are notified, and the notification opens that task');
+  ok((await T.call('GET', '/tasks/' + tid)).s === 200 && (await T.call('GET', `/tasks/${tid}/collab`)).j.can_edit === true, 'an assignee who is not on the project can still open and work on the task');
+  ok((await T.call('GET', `/tasks?assignee_id=${tId}`)).j.some((x) => x.id === tid) && (await T.call('GET', '/dashboard')).j.my_tasks.some((x) => x.id === tid), '"Assigned to me" and the dashboard include tasks where she is the second person');
+  ok((await F.call('GET', '/dashboard')).j.team_load.find((x) => x.id === tId).open_tasks >= 1, 'team workload counts every person on a task');
+  ok((await T.call('PUT', '/tasks/' + tid, { status: 'in_progress' })).s === 200, 'the second assignee can move the task');
+  ok((await notes(K)).some((n) => n.link === link && /moved T-\d+ .* to In progress/.test(n.text)) && (await notes(F)).some((n) => n.link === link && /moved/.test(n.text)), 'watchers (other assignee, creator) hear about the status change');
+  const hist = (await F.call('GET', `/notes?entity_type=task&entity_id=${tid}`)).j.filter((n) => n.kind === 'history');
+  ok(hist.some((n) => n.body === 'changed status from To do to In progress' && n.user_id === tId) && hist.some((n) => n.body === 'created this task'), 'history records who changed what', hist.map((n) => n.body));
+  ok((await T.call('DELETE', '/notes/' + hist[0].id)).s === 403 && (await F.call('DELETE', '/notes/' + hist[0].id)).s === 403, 'history cannot be deleted, not even by a founder');
+  await T.call('PUT', '/tasks/' + tid, { assignee_ids: [tId], title: 'mine now' });
+  ok((await F.call('GET', '/tasks/' + tid)).j.assignees.length === 2, 'an intern cannot change who is on a task');
+  ok((await F.call('POST', '/tasks', { title: 'ghost', assignee_ids: [999999] })).s === 400, 'cannot assign someone who does not exist');
+  // checklist
+  const c1 = await K.call('POST', `/tasks/${tid}/checklist`, { text: 'Backend part', assignee_id: tId });
+  ok(c1.s === 201 && c1.j[0].assignee_id === tId && (await notes(T)).some((n) => /gave you a checklist item/.test(n.text)), 'an assignee adds a checklist item for a teammate, who is notified');
+  ok((await K.call('POST', `/tasks/${tid}/checklist`, { text: 'x', assignee_id: meeraId })).s === 400, 'checklist items can only go to people on the task');
+  ok((await K.call('POST', `/tasks/${tid}/checklist`, { text: '   ' })).s === 400, 'empty checklist item refused');
+  const tick = await T.call('PUT', `/tasks/${tid}/checklist/${c1.j[0].id}`, { done: true });
+  ok(tick.j[0].done === 1 && tick.j[0].done_by === tId && (await F.call('GET', '/tasks/' + tid)).j.check_done === 1, 'ticking records who did it and updates the task progress');
+  // a project teammate who is not on the task: may read and discuss, not change
+  const acmeTask = await F.call('POST', '/tasks', { title: 'Kabir only', project_id: acme.id, assignee_ids: [kId] });
+  const tc = await T.call('GET', `/tasks/${acmeTask.j.id}/collab`);
+  ok(tc.s === 200 && tc.j.can_edit === false && (await T.call('POST', `/tasks/${acmeTask.j.id}/checklist`, { text: 'x' })).s === 403 && (await T.call('PUT', '/tasks/' + acmeTask.j.id, { status: 'done' })).s === 403, 'a project teammate not on the task can read it but not change status or checklist');
+  ok((await T.call('POST', '/notes', { entity_type: 'task', entity_id: acmeTask.j.id, body: 'Can I help?' })).s === 201, '…and can still join the discussion');
+  // someone with no access at all
+  const greenOnly = await F.call('POST', '/tasks', { title: 'Tara only', project_id: green.id, assignee_ids: [tId] });
+  const kOut = [await K.call('GET', `/tasks/${greenOnly.j.id}/collab`), await K.call('POST', `/tasks/${greenOnly.j.id}/checklist`, { text: 'x' }), await K.call('POST', `/tasks/${greenOnly.j.id}/watch`, {}), await K.call('POST', '/notes', { entity_type: 'task', entity_id: greenOnly.j.id, body: 'x' })];
+  ok(kOut.every((x) => [403, 404].includes(x.s)), 'an outsider cannot read, tick, watch or comment on the task', kOut.map((x) => x.s));
+  // comments, mentions, editing
+  const fBefore = (await notes(F)).length;
+  const cm = await K.call('POST', '/notes', { entity_type: 'task', entity_id: tid, body: '@Tara Nair please check', mentions: [tId, 'junk', kId] });
+  const tN = (await notes(T)).filter((n) => n.link === link);
+  ok(cm.s === 201 && JSON.parse(cm.j.mentions).map((m) => m.id).join() === String(tId), 'mentions are stored (junk ids and self-mentions dropped)', cm.j.mentions);
+  ok(tN.some((n) => /mentioned you on T-/.test(n.text)) && !tN.some((n) => /Kabir Singh commented/.test(n.text)), 'the mentioned person gets one "mentioned you" notification, not two');
+  ok((await notes(F)).length === fBefore + 1, 'the creator (watching) gets a "commented" notification');
+  ok((await T.call('PUT', '/notes/' + cm.j.id, { body: 'hacked' })).s === 403 && (await K.call('PUT', '/notes/' + hist[0].id, { body: 'x' })).s === 403, 'nobody can edit someone else\'s comment or the history');
+  const ed = await K.call('PUT', '/notes/' + cm.j.id, { body: '@Tara Nair please check the API' });
+  ok(ed.s === 200 && ed.j.edited_at && ed.j.body.endsWith('the API'), 'you can fix your own comment and it shows as edited');
+  // watchers
+  await K.call('POST', `/tasks/${tid}/watch`, { on: false });
+  const kBefore = (await notes(K)).length;
+  await F.call('POST', '/notes', { entity_type: 'task', entity_id: tid, body: 'update from founder' });
+  ok((await notes(K)).length === kBefore, 'unwatching stops comment notifications');
+  ok((await K.call('POST', `/tasks/${tid}/watch`, {})).j.watching === true, 'and watching again turns them back on');
+  // taking someone off the task takes away access, and mentioning them no longer pings them
+  await F.call('PUT', '/tasks/' + tid, { assignee_ids: [kId] });
+  ok((await T.call('GET', '/tasks/' + tid)).s === 404, 'removing an intern from the task removes her access');
+  ok((await F.call('GET', `/notes?entity_type=task&entity_id=${tid}`)).j.some((n) => n.kind === 'history' && n.body === 'removed Tara Nair'), 'history shows who was removed');
+  const tCount = (await notes(T)).length;
+  const late = await K.call('POST', '/notes', { entity_type: 'task', entity_id: tid, body: '@Tara Nair?', mentions: [tId] });
+  ok(late.j.mentions === null && (await notes(T)).length === tCount, 'people who cannot see the task are not mentioned or notified');
+  ok(!(await F.call('GET', `/tasks/${tid}/collab`)).j.people.some((p) => p.id === tId), 'the @mention list only offers people who can open the task');
+  await F.call('DELETE', '/tasks/' + tid);
+  ok(['task_assignees', 'task_watchers', 'task_checklist'].every((tb) => db.prepare(`SELECT COUNT(*) n FROM ${tb} WHERE task_id=?`).get(tid).n === 0), 'deleting a task cleans up its people, watchers and checklist'); }
+
   /* ------------------------------------------------------------------ */
   group('Injection & malformed input');
   ok((await F.call('GET', "/clients?status=' OR 1=1 --")).j.length === 0, 'SQL injection in a list filter returns nothing (parameterised)');
