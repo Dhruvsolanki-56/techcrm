@@ -61,3 +61,7 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/settings.json
+
+# local screenshot helpers
+web/e2e/modals.mjs
+web/e2e/shots.mjs
