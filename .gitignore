@@ -1,12 +1,63 @@
+# ── Dependencies ─────────────────────────────────────────
 node_modules/
+
+# ── Build outputs ────────────────────────────────────────
+# server (tsup → dist/)
+server/dist/
+
+# web (vite → dist/)
+web/dist/
+
+# ── Test coverage ────────────────────────────────────────
+server/coverage/
+web/coverage/
+packages/*/coverage/
+
+# ── Runtime data (never commit) ──────────────────────────
 data/
 demo-data/
-*.log
+
+# SQLite database files
 *.db
 *.db-wal
 *.db-shm
+
+# Vault encryption key — losing this loses all stored passwords
 .vault.key
+
+# ── Environment & secrets ────────────────────────────────
 .env
 .env.*
-public/*.tmp.js
+!.env.example
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+logs/
+pino.log
+
+# ── TypeScript / tooling cache ───────────────────────────
+*.tsbuildinfo
+.turbo/
+.cache/
+
+# ── Vite / Vitest ────────────────────────────────────────
+.vite/
+web/.vite/
+
+# ── Playwright (e2e test output) ─────────────────────────
+web/test-results/
+web/playwright-report/
+web/.playwright/
+
+# ── Legacy Netlify deploy artefacts ─────────────────────
 .netlify/
+public/*.tmp.js
+
+
+# ── OS / editor noise ────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json

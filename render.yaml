@@ -1,20 +1,17 @@
-# Render blueprint for the PUBLIC DEMO (sample data, resets on every restart).
-# Render dashboard → New → Blueprint → pick this GitHub repo.
+# Render blueprint: Dashboard -> New -> Blueprint -> pick this repository.
 services:
   - type: web
-    name: techcrm-demo
-    runtime: node
-    plan: free
+    name: techsentinals-crm
+    runtime: docker
+    plan: starter
     region: singapore
-    buildCommand: npm ci --omit=dev
-    startCommand: node scripts/demo-start.js
-    healthCheckPath: /api/auth/state
+    healthCheckPath: /api/health
+    disk:
+      name: crm-data
+      mountPath: /data
+      sizeGB: 5
     envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: DEMO_MODE
-        value: "1"
       - key: TRUST_PROXY
-        value: "2"          # Netlify → Render: two proxies in front of the app
+        value: "1"
       - key: CRM_SECRET
         generateValue: true

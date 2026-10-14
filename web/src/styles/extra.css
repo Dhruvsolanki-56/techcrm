@@ -1,0 +1,40 @@
+/* Additions for the React app (the base design system is in app.css) */
+
+/* tabs are buttons now, not links */
+.tabs button { position: relative; padding: 10px 0 11px; color: var(--muted); font: inherit; font-weight: 500; white-space: nowrap; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.tabs button:hover { color: var(--ink); }
+.tabs button.on { color: var(--ink); }
+.tabs button.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--ink); border-radius: 2px; }
+.tabs .n { font-size: 11px; font-weight: 600; min-width: 18px; height: 18px; line-height: 18px; padding: 0 5px; text-align: center; border-radius: 99px; background: var(--hover); color: var(--muted); }
+.tag.plum { background: var(--plum-bg); color: var(--plum); } .tag.blue { background: var(--blue-bg); color: var(--blue); }
+
+/* modal body that holds a split layout needs no padding */
+.modal.xl .modal-b { padding: 0; }
+.pop-sec { margin-top: 22px; } .pop-sec h3 { font-size: 13.5px; }
+
+/* tables */
+tfoot tr.tot td { font-weight: 600; background: var(--subtle); }
+.tbl[aria-busy="true"] { position: relative; }
+table.t th.sortable { cursor: pointer; user-select: none; }
+
+/* misc helpers */
+.tnum { font-variant-numeric: tabular-nums; }
+.mono { font-family: "Geist Mono", ui-monospace, Menlo, Consolas, monospace; }
+.faint { color: var(--faint); } .muted { color: var(--muted); } .small { font-size: 12.5px; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skip-link { position: absolute; left: -999px; top: 8px; z-index: 999; background: var(--ink); color: #fff; padding: 8px 12px; border-radius: 8px; }
+.skip-link:focus { left: 8px; }
+.row.end { justify-content: flex-end; }
+.stack-sm > * + * { margin-top: 10px; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 1000px) { .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+.cr-chain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.cr-chain .step { padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); }
+.cr-chain .step.done { border-color: var(--green); color: var(--green); background: var(--green-bg); }
+.date-range { display: inline-flex; gap: 6px; align-items: center; }
+.date-range input { width: auto; }
+
+.prog { white-space: nowrap; }
+.panel-b.flush { padding: 0; }
