@@ -1,6 +1,6 @@
 import {
-  ACCOUNT_TYPES, CLIENT_STATUSES, CR_KINDS, CR_PHASES, CR_STATUSES, CRED_KINDS, CYCLES, DOC_CATEGORIES, EVENT_KINDS, FOLLOWUP_ROUNDS, GRANT_STATUSES, LEAD_PRIORITIES, LEAD_STAGES,
-  MAINT_STATUSES, MAINT_TYPES, MARKETS, MATCH_STATUSES, PRIORITIES, PROJECT_STATUSES, PROJECT_TYPES, RENEWAL_KINDS, RENEWAL_STATUSES, TASK_STATUSES, TRANSFER_KINDS, today,
+  MILESTONE_KINDS, ACCOUNT_TYPES, CLIENT_STATUSES, CR_KINDS, CR_PHASES, CR_STATUSES, CRED_KINDS, CYCLES, DOC_CATEGORIES, EVENT_KINDS, FOLLOWUP_ROUNDS, GRANT_STATUSES, LEAD_PRIORITIES, LEAD_STAGES,
+  MAINT_STATUSES, MAINT_TYPES, MARKETS, MATCH_STATUSES, PRIORITIES, PROJECT_STATUSES, PROJECT_TYPES, RENEWAL_KINDS, RENEWAL_STATUSES, TASK_STATUSES, TDS_STATUSES, TRANSFER_KINDS, today,
   type Option,
 } from '@crm/shared';
 import { settingList, type Lookups } from '../lib/session';
@@ -47,6 +47,7 @@ export const FORM_INFO: Record<string, string> = {
   transfers: 'Capital, withdrawals, reimbursements, tax payments or moves between accounts.',
   renewals: 'Anything that renews: maintenance plans, domains, hosting, SSL, subscriptions, bills.',
   maintenance_logs: 'A fix, update or support request for a live client.',
+  milestones: 'A part of the project value, billed when its work is finished.',
   events: 'A date to remember. Shows on everyone’s calendar.',
   grants: 'Government or programme funding: what you asked for, what came in, what is due to report.',
   assets: 'A laptop, phone or other device the company owns.',
@@ -56,7 +57,7 @@ export const FORM_INFO: Record<string, string> = {
 export const RESOURCE_LABEL: Record<string, string> = {
   leads: 'lead', clients: 'client', contacts: 'contact', projects: 'project', tasks: 'task', change_requests: 'change request', documents: 'document', payments: 'payment',
   expenses: 'expense', accounts: 'account', transfers: 'transfer', renewals: 'renewal', maintenance_logs: 'maintenance item', events: 'event', grants: 'grant', assets: 'asset',
-  bank_transactions: 'bank line', quotes: 'quotation', invoices: 'invoice',
+  bank_transactions: 'bank line', quotes: 'quotation', invoices: 'invoice', milestones: 'payment',
 };
 
 const S = (section: string, hint?: string): SectionDef => ({ section, hint });
@@ -69,8 +70,9 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
       ...settingList(c.lookups, 'lead_products').map((d): Option => [d, `${d} · Product`]),
     ], rec?.department);
     return [
-      S('Who'),
-      { name: 'company', label: 'Company / Person', required: true }, { name: 'name', label: 'Contact Person', help: 'Leave empty if the lead is a person.' },
+      S('Who', 'An existing client, a new company, or just a person — any of them can be a lead.'),
+      { name: 'client_id', label: 'Existing client', type: 'select', lookup: 'clients', blank: '— New person or company —', full: true, help: 'Pick one for new work from someone you already serve; their details are filled in. Leave empty for a new lead.' },
+      { name: 'company', label: 'Company (optional)', help: 'Leave empty if the lead is an individual.' }, { name: 'name', label: 'Contact person', help: 'Needed if there is no company and no existing client.' },
       { name: 'phone', label: 'Phone / WhatsApp', type: 'tel' }, { name: 'email', label: 'Email', type: 'email' },
       { name: 'city', label: 'City' }, { name: 'country', label: 'Country', default: 'India' },
       { name: 'market', label: 'Market', type: 'select', options: MARKETS, default: 'India' }, { name: 'website', label: 'Website' },
@@ -78,6 +80,7 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
       { name: 'department', label: 'Department / Product', type: 'select', options: dept, help: 'Business Side (Service / Product) is filled in from this.' },
       { name: 'category', label: 'Category', type: 'select', options: list(c, 'lead_categories', rec?.category) },
       { name: 'requirement', label: 'Requirement / Interested In', type: 'textarea', full: true, rows: 2 },
+      { name: 'specs', label: 'Specification (what they want built)', type: 'textarea', full: true, rows: 5, help: 'Pages, features, integrations, hosting. It is copied to the project when this lead is converted — keep adding to it after every conversation or demo.' },
       { name: 'source', label: 'Lead Source', type: 'select', options: list(c, 'lead_sources', rec?.source) },
       { name: 'owner_id', label: 'Assigned To', type: 'select', lookup: 'users', ...(rec?.assigned_name && !rec?.owner_id ? { help: `In the sheet: ${String(rec.assigned_name)} (not a team member yet)` } : {}) },
       S('Where it stands'),
@@ -167,7 +170,12 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     S('Payment'),
     { name: 'amount', label: 'Amount (₹)', type: 'money', required: true }, { name: 'date', label: 'Date', type: 'date', required: true, default: today() },
     { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients' }, { name: 'invoice_id', label: 'Invoice', type: 'select', options: [], help: 'Pick the client first.' },
-    { name: 'tds', label: 'TDS deducted (₹)', type: 'money', help: 'Counts towards the invoice, not cash in the bank.' }, { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' },
+    { name: 'tds', label: 'TDS deducted (₹)', type: 'money', help: 'Tax the client deducted on this payment. It is not part of the invoice or of the money you received — it is tracked so you can claim it in your ITR.' }, { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' },
+    ...[
+      S('TDS credit', 'Tracked until you claim it in your income-tax return'),
+      { name: 'tds_status', label: 'TDS status', type: 'select', options: TDS_STATUSES, default: 'deducted' } as FormItem, { name: 'tds_section', label: 'Section (optional)', help: 'e.g. 194J, 194C' } as FormItem,
+      { name: 'tds_claimed_on', label: 'Claimed in ITR on', type: 'date', help: 'Filled in automatically when the status is Claimed.' } as FormItem,
+    ],
     S('Where it went'),
     { name: 'account_id', label: 'Into account', type: 'select', lookup: 'accounts' }, { name: 'method', label: 'Payment Mode', type: 'select', options: list(c, 'payment_modes', c.rec?.method) },
     { name: 'reference', label: 'Reference / UTR no.' }, { name: 'notes', label: 'Notes' },
@@ -191,7 +199,7 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
   ],
   accounts: () => [
-    { name: 'name', label: 'Account name', required: true, placeholder: 'e.g. HDFC Current A/c', full: true }, { name: 'type', label: 'Type', type: 'select', options: ACCOUNT_TYPES, required: true },
+    { name: 'name', label: 'Account name', required: true, placeholder: 'e.g. HDFC Current A/c', full: true }, { name: 'type', label: 'Type', type: 'select', options: ACCOUNT_TYPES, required: true, default: 'bank' },
     { name: 'opening_balance', label: 'Opening balance (₹)', type: 'money' }, { name: 'active', label: 'In use', type: 'checkbox', default: 1, full: true },
     { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
   ],
@@ -207,10 +215,12 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     { name: 'kind', label: 'Kind', type: 'select', options: RENEWAL_KINDS, required: true, default: 'domain' }, { name: 'category', label: 'Category' }, { name: 'vendor', label: 'Vendor / registrar' },
     { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients' }, { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' },
     S('When & how much'),
-    { name: 'renewal_date', label: 'Next date', type: 'date', required: true }, { name: 'cycle', label: 'Cycle', type: 'select', options: CYCLES, required: true, default: 'yearly' },
+    { name: 'renewal_date', label: 'Next date', type: 'date' }, { name: 'cycle', label: 'Cycle', type: 'select', options: CYCLES, default: 'yearly' },
     { name: 'our_cost', label: 'Cost per cycle (₹)', type: 'money', help: 'For a bill that changes every month, enter a typical amount and tick “amount changes”.' },
     { name: 'client_price', label: 'Client pays per cycle (₹)', type: 'money', help: 'Maintenance plans count as monthly recurring income.' },
-    { name: 'owner_id', label: 'Owner', type: 'select', lookup: 'users', blank: '— Company —' },
+    { name: 'scope', label: 'Who pays for it', type: 'select', options: [['company', 'The company (debited automatically)'], ['personal', 'A person (tracked only, not deducted)']], required: true, default: 'company', help: 'Company items are recorded as company expenses on their date. A personal subscription (e.g. one founder’s own tool) is tracked but never deducted from company money.' },
+    { name: 'owner_id', label: 'Owner / person', type: 'select', lookup: 'users', blank: '— Company —' },
+    { name: 'next_amount', label: 'Amount for the next cycle only (₹)', type: 'money', help: 'This month’s bill is different (e.g. ₹900 instead of ₹700)? Type it here: the next debit uses it once, then the normal cost applies again. Leave empty for the normal cost.' },
     { name: 'status', label: 'Status', type: 'select', options: RENEWAL_STATUSES, required: true, default: 'active' }, { name: 'auto_renew', label: 'Renews automatically', type: 'checkbox' },
     { name: 'auto_debit', label: 'Debit the cost automatically', type: 'checkbox', help: 'On the date the CRM records the expense for you and moves the date forward. Needs a cost, a repeating cycle and a date.' },
     { name: 'amount_varies', label: 'Amount changes every cycle (e.g. a postpaid bill)', type: 'checkbox', help: 'Each debit is recorded as a pending estimate; edit it when the real bill arrives.' },
@@ -248,6 +258,15 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     { name: 'withdrawal', label: 'Withdrawal (₹)', type: 'money' }, { name: 'deposit', label: 'Deposit (₹)', type: 'money' },
     { name: 'balance', label: 'Balance (₹)', type: 'money', help: 'Optional — as printed on the statement.' }, { name: 'matched_status', label: 'Matched Status', type: 'select', options: MATCH_STATUSES, required: true, default: 'Unmatched' },
     { name: 'match_note', label: 'Match Note', full: true },
+  ],
+  milestones: () => [
+    { name: 'title', label: 'What this payment is for', required: true, full: true, placeholder: 'e.g. Advance, Design approval, Go-live' },
+    { name: 'kind', label: 'Kind', type: 'select', options: MILESTONE_KINDS, required: true, default: 'milestone' },
+    { name: 'percent', label: 'Percent of agreed value', type: 'number', help: 'The amount is worked out from this. Leave empty to type an amount.' },
+    { name: 'amount', label: 'Amount before tax (₹)', type: 'money' },
+    { name: 'due_date', label: 'Bill on or after', type: 'date' },
+    { name: 'reached_on', label: 'Work finished on', type: 'date', help: 'Set this when the work behind the payment is done — it then shows up as ready to invoice.' },
+    { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
   ],
   events: () => [
     { name: 'title', label: 'Title', required: true, full: true, placeholder: 'e.g. GST filing due' }, { name: 'date', label: 'Date', type: 'date', required: true },

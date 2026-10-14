@@ -8,7 +8,7 @@ import { runAutoDebits } from './autoDebit';
 
 /** One notification per person per day for the same thing (the jobs run hourly). */
 function once(ctx: AppContext, userId: number, text: string, link: string): void {
-  const dup = ctx.db.prepare("SELECT 1 FROM notifications WHERE user_id=? AND text=? AND date(at)=date('now','localtime')").get(userId, text);
+  const dup = ctx.db.prepare("SELECT 1 FROM notifications WHERE user_id=? AND text=? AND date(at,'localtime')=date('now','localtime')").get(userId, text);
   if (!dup) ctx.notify(userId, text, link);
 }
 

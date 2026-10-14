@@ -10,7 +10,9 @@ import { forbidden, HttpError, need, notFound } from '../shared/errors';
 import { intOrNull, str } from '../http/validate';
 import { isFounder, type User } from '../security/permissions';
 
-const DOC_ENTITIES: Record<string, string> = { client: 'clients', lead: 'leads', project: 'projects', task: 'tasks', invoice: 'invoices', quote: 'quotes', change_request: 'change_requests' };
+const DOC_ENTITIES: Record<string, string> = { client: 'clients', lead: 'leads', project: 'projects', task: 'tasks', invoice: 'invoices', quote: 'quotes', change_request: 'change_requests',
+  expense: 'expenses', payment: 'payments', grant: 'grants', renewal: 'renewals', asset: 'assets', milestone: 'milestones', maintenance: 'maintenance_logs',
+};
 const INLINE_OK = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf']);
 
 /** Files (stored under random names, always served as downloads) and links to documents kept elsewhere. */
@@ -33,7 +35,7 @@ export function documentRoutes(ctx: AppContext, engine: Engine): express.Router 
     } else {
       need(Object.hasOwn(DOC_ENTITIES, type) && eid, 'Unknown attachment target.');
       if (!engine.scoped(DOC_ENTITIES[type] as string, eid as number, user(req))) throw forbidden();
-      if (!isFounder(user(req)) && !['project', 'task'].includes(type)) throw forbidden();
+      if (!isFounder(user(req)) && !['project', 'task', 'change_request', 'maintenance'].includes(type)) throw forbidden();
     }
     const expiry = str(b.expiry_date, 10);
     need(!expiry || validDate(expiry), 'Expiry date must be a real date.');

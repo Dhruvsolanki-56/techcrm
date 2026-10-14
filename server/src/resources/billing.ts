@@ -1,9 +1,10 @@
 import {
-  ACCOUNT_TYPES, CYCLES, GRANT_STATUSES, INVOICE_KINDS, INVOICE_STATUSES, MATCH_STATUSES, QUOTE_STATUSES, RENEWAL_KINDS, RENEWAL_STATUSES, TAX_TYPES, TRANSFER_KINDS, values,
+  MILESTONE_KINDS, ACCOUNT_TYPES, CYCLES, GRANT_STATUSES, INVOICE_KINDS, INVOICE_STATUSES, MATCH_STATUSES, QUOTE_STATUSES, RENEWAL_KINDS, RENEWAL_STATUSES, TAX_TYPES, TRANSFER_KINDS, values,
 } from '@crm/shared';
 import { defineResource } from '../crud/define';
 import { refSql } from '../crud/refs';
 import { ALL, NONE, type ResourceDef } from '../crud/types';
+import { today, TDS_STATUSES } from '@crm/shared';
 import type { Row } from '../db/connection';
 import { HttpError } from '../shared/errors';
 import { isFounder } from '../security/permissions';
@@ -54,6 +55,10 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     },
     after(op, row, ex, { user }) {
       syncChangeRequestWithQuote(ctx, row, ex ? ex.status : null, user.id);
+      // sending a proposal to a lead moves the lead to "Proposal Sent"
+      if (row.lead_id && row.status === 'sent' && ex?.status !== 'sent') {
+        db.prepare("UPDATE leads SET stage='proposal', proposal_date=COALESCE(proposal_date, ?), updated_at=datetime('now') WHERE id=? AND stage IN ('new','contacted','qualified','meeting')").run(today(), row.lead_id);
+      }
       if (op === 'create' && row.change_request_id) {
         db.prepare("UPDATE change_requests SET quote_id=?, status=CASE WHEN status IN ('requested','estimated') THEN 'quoted' ELSE status END, updated_at=datetime('now') WHERE id=?").run(row.id, row.change_request_id);
       }
@@ -72,7 +77,7 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
       discount: 'n', tax_type: 't', tax_rate: 'n', currency: 't', terms: 't', notes: 't',
     },
     required: ['client_id'], notNull: ['status', 'kind'], enums: { status: values(INVOICE_STATUSES), kind: [...INVOICE_KINDS], tax_type: values(TAX_TYPES) },
-    columns: `i.*, (i.total - i.paid_amount) AS balance, c.company AS client_name, p.name AS project_name, q.number AS quote_number, cr.title AS change_request_title`,
+    columns: `i.*, MAX(i.total - i.paid_amount, 0) AS balance, MAX(i.paid_amount - i.total, 0) AS credit, c.company AS client_name, p.name AS project_name, q.number AS quote_number, cr.title AS change_request_title`,
     from: `FROM invoices i LEFT JOIN clients c ON c.id=i.client_id LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN quotes q ON q.id=i.quote_id LEFT JOIN change_requests cr ON cr.id=i.change_request_id`,
     search: ['i.number', 'i.title', 'c.company', 'p.name', 'q.number'],
     filters: { client_id: 'i.client_id', project_id: 'i.project_id', status: 'i.status', kind: 'i.kind', change_request_id: 'i.change_request_id' },
@@ -102,7 +107,7 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
   const payments = defineResource({
     table: 'payments', alias: 'pm',
     label: (r) => `₹${r.amount}`,
-    fields: { invoice_id: 'i', client_id: 'i', project_id: 'i', account_id: 'i', date: 'd', amount: 'n', tds: 'n', method: 't', reference: 't', notes: 't', category: 't', grant_id: 'i' },
+    fields: { invoice_id: 'i', client_id: 'i', project_id: 'i', account_id: 'i', date: 'd', amount: 'n', tds: 'n', tds_status: 't', tds_section: 't', tds_claimed_on: 'd', method: 't', reference: 't', notes: 't', category: 't', grant_id: 'i' },
     required: ['date', 'amount'],
     columns: 'pm.*, c.company AS client_name, i.number AS invoice_number, p.name AS project_name, a.name AS account_name, g.name AS grant_name',
     from: `FROM payments pm LEFT JOIN clients c ON c.id=pm.client_id LEFT JOIN invoices i ON i.id=pm.invoice_id LEFT JOIN projects p ON p.id=pm.project_id
@@ -125,6 +130,9 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
       }
       if (d.amount !== undefined && !(d.amount > 0)) throw new HttpError(400, 'Amount must be greater than zero.');
       if (d.tds !== undefined && d.tds < 0) throw new HttpError(400, 'TDS cannot be negative.');
+      if (d.tds_status !== undefined && !TDS_STATUSES.some(([k]) => k === d.tds_status)) d.tds_status = 'deducted';
+      if (d.tds_status === 'claimed' && !d.tds_claimed_on && !ex?.tds_claimed_on) d.tds_claimed_on = today();
+      if (d.tds_status && d.tds_status !== 'claimed') d.tds_claimed_on = null;
     },
     after(_op, row, ex) {
       refreshInvoice(ctx, row.invoice_id);
@@ -260,33 +268,65 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     label: (r) => r.name,
     fields: {
       client_id: 'i', project_id: 'i', kind: 't', name: 't', vendor: 't', renewal_date: 'd', cycle: 't', our_cost: 'n', client_price: 'n', auto_renew: 'b', auto_debit: 'b',
-      amount_varies: 'b', pay_account_id: 'i', status: 't', notes: 't', owner_id: 'i', category: 't',
+      amount_varies: 'b', scope: 't', next_amount: 'n', pay_account_id: 'i', status: 't', notes: 't', owner_id: 'i', category: 't',
     },
-    required: ['name'], notNull: ['status'], enums: { kind: values(RENEWAL_KINDS), cycle: values(CYCLES), status: values(RENEWAL_STATUSES) },
+    required: ['name'], notNull: ['status'], enums: { kind: values(RENEWAL_KINDS), cycle: values(CYCLES), status: values(RENEWAL_STATUSES), scope: ['company', 'personal'] },
     columns: `r.*, c.company AS client_name, p.name AS project_name, COALESCE(o.name, r.assigned_name) AS owner_name, pa.name AS pay_account_name,
       ROUND(r.our_cost / CASE r.cycle WHEN 'monthly' THEN 1 WHEN 'quarterly' THEN 3 WHEN 'half-yearly' THEN 6 WHEN 'yearly' THEN 12 WHEN 'biennial' THEN 24 WHEN 'triennial' THEN 36 ELSE NULL END, 2) AS monthly_cost,
       ROUND(r.our_cost * 12.0 / CASE r.cycle WHEN 'monthly' THEN 1 WHEN 'quarterly' THEN 3 WHEN 'half-yearly' THEN 6 WHEN 'yearly' THEN 12 WHEN 'biennial' THEN 24 WHEN 'triennial' THEN 36 ELSE NULL END, 2) AS annual_cost`,
     from: `FROM renewals r LEFT JOIN clients c ON c.id=r.client_id LEFT JOIN projects p ON p.id=r.project_id LEFT JOIN users o ON o.id=r.owner_id LEFT JOIN accounts pa ON pa.id=r.pay_account_id`,
     search: ['r.name', 'r.vendor', 'r.category', 'r.notes', 'c.company', 'p.name', refSql('renewals', 'r')],
-    filters: { client_id: 'r.client_id', project_id: 'r.project_id', kind: 'r.kind', status: 'r.status', owner_id: 'r.owner_id', auto_debit: 'r.auto_debit' },
+    filters: { client_id: 'r.client_id', project_id: 'r.project_id', kind: 'r.kind', status: 'r.status', owner_id: 'r.owner_id', auto_debit: 'r.auto_debit', scope: 'r.scope' },
     sortable: { name: 'r.name COLLATE NOCASE', renewal_date: "COALESCE(r.renewal_date,'9999')", our_cost: 'r.our_cost', kind: 'r.kind', status: 'r.status' },
     order: "COALESCE(r.renewal_date,'9999')",
     scope: founderScope, can: (u) => isFounder(u),
-    before(_op, d, ex) {
+    before(_op, d) {
       if (d.owner_id) d.assigned_name = null;
-      const on = 'auto_debit' in d ? d.auto_debit : ex?.auto_debit;
-      const cost = 'our_cost' in d ? d.our_cost : ex?.our_cost;
-      const cycle = d.cycle || ex?.cycle;
-      if (on && !(cost > 0)) throw new HttpError(400, 'Enter the cost per cycle to debit automatically (for a bill that changes every month, enter a typical amount).');
-      if (on && cycle === 'one-time') throw new HttpError(400, 'A one-time item has no next date, so it cannot debit automatically. Choose a repeating cycle.');
-      if (on && !('renewal_date' in d ? d.renewal_date : ex?.renewal_date)) throw new HttpError(400, 'Set the renewal date: it is the day the first debit is recorded.');
+      // an empty "amount for the next cycle" means "use the normal cost", not zero
+      if ('next_amount' in d && !(d.next_amount > 0)) d.next_amount = null;
     },
     after(_op, row) {
       if (row.auto_debit) runAutoDebits(ctx);
     },
   });
 
-  return { quotes, invoices, payments, expenses, accounts, transfers, grants, assets, bank_transactions: bankTransactions, renewals };
+
+  /* ---------- payment milestones: how a project's agreed value is billed ---------- */
+  const MS_STATE = `CASE
+    WHEN i.id IS NOT NULL AND i.status='paid' THEN 'paid'
+    WHEN i.id IS NOT NULL AND i.status='cancelled' THEN 'planned'
+    WHEN i.id IS NOT NULL AND i.status='overdue' THEN 'overdue'
+    WHEN i.id IS NOT NULL THEN 'invoiced'
+    WHEN ms.reached_on IS NOT NULL THEN 'ready'
+    WHEN ms.due_date IS NOT NULL AND ms.due_date < date('now','localtime') THEN 'late'
+    ELSE 'planned' END`;
+  const milestones = defineResource({
+    table: 'milestones', alias: 'ms', timestamps: true,
+    label: (r) => `${r.title}${r.project_name ? ` (${r.project_name})` : ''}`,
+    fields: { project_id: 'i', title: 't', kind: 't', percent: 'n', amount: 'n', due_date: 'd', reached_on: 'd', position: 'i', notes: 't' },
+    required: ['title', 'project_id'], notNull: ['kind'], enums: { kind: values(MILESTONE_KINDS) },
+    columns: `ms.*, p.name AS project_name, p.code AS project_code, p.client_id AS client_id, c.company AS client_name, p.budget AS project_value,
+      i.number AS invoice_number, i.status AS invoice_status, i.total AS invoice_total, i.paid_amount AS invoice_paid, (${MS_STATE}) AS state`,
+    from: `FROM milestones ms JOIN projects p ON p.id=ms.project_id LEFT JOIN clients c ON c.id=p.client_id LEFT JOIN invoices i ON i.id=ms.invoice_id`,
+    search: ['ms.title', 'p.name', 'c.company', refSql('milestones', 'ms')],
+    filters: { project_id: 'ms.project_id', client_id: 'p.client_id', state: (v) => ({ sql: `(${MS_STATE}) = ?`, params: [v] }) },
+    sortable: { title: 'ms.title COLLATE NOCASE', due_date: "COALESCE(ms.due_date,'9999')", amount: 'ms.amount', position: 'ms.position' },
+    order: 'ms.project_id, ms.position, ms.id',
+    scope: founderScope, can: (u) => isFounder(u),
+    before(op, d, ex) {
+      const projectId = 'project_id' in d ? d.project_id : ex?.project_id;
+      const project = projectId ? one('SELECT id, budget FROM projects WHERE id=?', projectId) : undefined;
+      if (!project) throw new HttpError(400, 'Choose the project this payment belongs to.');
+      // a percentage is worked out from the agreed value
+      if (d.percent !== undefined && d.percent !== null && !('amount' in d) && project.budget > 0) d.amount = Math.round(project.budget * d.percent) / 100;
+      const amount = 'amount' in d ? d.amount : ex?.amount;
+      if (!(amount > 0)) throw new HttpError(400, 'Enter the amount (or a percentage of the agreed value).');
+      if (d.percent !== undefined && d.percent !== null && (d.percent <= 0 || d.percent > 100)) throw new HttpError(400, 'Percent must be between 0 and 100.');
+      if (op === 'create' && d.position === undefined) d.position = (one('SELECT COALESCE(MAX(position),0)+1 n FROM milestones WHERE project_id=?', projectId)?.n as number) ?? 1;
+    },
+  });
+
+  return { quotes, invoices, payments, milestones, expenses, accounts, transfers, grants, assets, bank_transactions: bankTransactions, renewals };
 }
 
 export { markOverdue };

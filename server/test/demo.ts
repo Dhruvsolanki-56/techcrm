@@ -104,7 +104,7 @@ export async function createDemo(env: Record<string, string> = {}): Promise<Demo
   await mkInv(clients.acme as number, proj.acme as number, 'Fleet portal — milestone 1', [{ description: 'Design sign-off milestone', hsn: '998314', qty: 1, rate: 90000 }], ago(18), ago(3), [[50000, ago(10)]]);
   await mkInv(clients.green as number, proj.green as number, 'Online store — phase 1', [{ description: 'Store redesign & migration', hsn: '998314', qty: 1, rate: 140000 }], ago(30), ago(15), [[165200, ago(14), 0]]);
   await mkInv(clients.green as number, proj.green as number, 'Online store — final', [{ description: 'Launch milestone', hsn: '998314', qty: 1, rate: 80000 }], ago(1), inn(14), []);
-  await mkInv(clients.bright as number, proj.bright as number, 'Website maintenance — last month', [{ description: 'Monthly maintenance plan', hsn: '998313', qty: 1, rate: 6000 }], ago(33), ago(18), [[6080, ago(15), 1000]]);
+  await mkInv(clients.bright as number, proj.bright as number, 'Website maintenance — last month', [{ description: 'Monthly maintenance plan', hsn: '998313', qty: 1, rate: 6000 }], ago(33), ago(18), [[7080, ago(15), 600]]);
   await call('POST', '/quotes', { lead_id: leads.l1, title: 'Proposal — Kumar Textiles online store', items: [{ description: 'E-commerce store design & build (up to 100 products)', hsn: '998314', qty: 1, rate: 280000 }, { description: 'Payment gateway + shipping integration', qty: 1, rate: 45000 }], status: 'sent' });
   for (const [category, vendor, amount, tax, d, paid_by_id, project_id] of [
     ['Salaries / Stipends', 'Interns stipend', 24000, 0, ago(5), null, null], ['Software & SaaS', 'Figma + GitHub + Notion', 7800, 1190, ago(12), null, null], ['Hosting & Domains', 'AWS', 9200, 1404, ago(8), null, proj.acme],

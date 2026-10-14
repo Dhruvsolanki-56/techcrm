@@ -88,7 +88,10 @@ export const errorHandler = (ctx: AppContext): ErrorRequestHandler => (err, req:
   }
   if (e.code === 'LIMIT_FILE_SIZE') { res.status(413).json({ error: 'File is larger than 60 MB.' }); return; }
   if (/UNIQUE constraint/.test(e.message ?? '')) { res.status(409).json({ error: 'That value already exists (it must be unique).' }); return; }
-  if (/FOREIGN KEY/.test(e.message ?? '')) { res.status(409).json({ error: 'This record is still linked to other records, or points to something that no longer exists.' }); return; }
+  if (/FOREIGN KEY/.test(e.message ?? '')) {
+    res.status(409).json({ error: req.method === 'DELETE' ? 'This record is still used by other records, so it cannot be deleted.' : 'One of the records you picked (client, project, invoice, account …) no longer exists. Refresh and choose again.' });
+    return;
+  }
   if (e.type === 'entity.parse.failed') { res.status(400).json({ error: 'The request could not be read.' }); return; }
   if (e.type === 'entity.too.large') { res.status(413).json({ error: 'The request is too large.' }); return; }
   if (e.expose && e.status && e.status >= 400 && e.status < 500) { res.status(e.status).json({ error: 'Bad request.' }); return; }

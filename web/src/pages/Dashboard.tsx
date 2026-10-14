@@ -1,33 +1,30 @@
-import { LEAD_STAGES, PRIORITIES, compact, daysUntil, today } from '@crm/shared';
+import { LEAD_STAGES, compact, daysUntil } from '@crm/shared';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { DeliveryAnalytics } from '../components/DeliveryAnalytics';
-import { FinanceAnalytics } from '../components/FinanceAnalytics';
-import { SalesAnalytics } from '../components/SalesAnalytics';
+import { AttentionRow, useAttention } from '../components/Attention';
 import { TaskModal } from '../components/TaskModal';
 import { useEditor } from '../forms/RecordEditor';
 import { api, type Row } from '../lib/api';
-import { fmtDate, fmtMonth, money, plural } from '../lib/format';
-import { useAct, useGet, useParam } from '../lib/hooks';
+import { fmtMonth, money, plural } from '../lib/format';
+import { useAct, useGet } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import { ago } from '../shell/Bell';
 import { HBars, Legend, LineChart } from '../ui/charts';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
-import { Avatar, Badge, Due, ErrorBox, Kpis, LogoSq, Panel, Priority, Skeleton, Tabs, pretty } from '../ui/primitives';
+import { Avatar, Badge, Due, ErrorBox, Kpis, LogoSq, Panel, Priority, Skeleton, pretty } from '../ui/primitives';
 
 interface Dash {
   today: string; role: string; my_tasks: Row[]; deadlines: Row[]; my_projects: Row[]; tasks_overdue: number; followups?: Row[];
   renewals?: Row[]; kpi?: {
     open_leads: { n: number; v: number }; active_projects: number; receivables: number; overdue: { v: number; n: number }; month_income: number; month_expense: number; mrr: number; recurring_cost: number;
-    quotes_pending: { n: number; v: number }; open_change_requests: { n: number; v: number }; cash: number;
+    quotes_pending: { n: number; v: number }; unbilled?: { amount: number; projects: number; pending: number; overdue: number; to_get: number; clients: number }; tds?: { deducted: number; claimed: number; to_claim: number }; open_change_requests: { n: number; v: number }; cash: number;
   };
   overdue_invoices?: Row[]; activity?: Row[]; overdue_tasks?: Row[]; pipeline?: Record<string, { n: number; v: number }>; trend?: { month: string; income: number; expense: number }[];
   team_load?: Row[]; by_client?: { k: string; v: number }[]; spend_by_category?: { k: string; v: number }[]; auto_debits?: Row[]; pending_estimates?: { n: number; v: number };
   work?: { clients: { n: number; active: number }; projects: { k: string; n: number }[]; invoices: { n: number; total: number; open: number } }; change_requests?: Row[];
 }
 
-interface Att { kind: string; when: string; title: string; sub: string; link?: string; task?: number }
 
 function TaskLine({ t, onOpen, onDone }: { t: Row; onOpen(id: number): void; onDone(id: number): void }) {
   return (
@@ -44,43 +41,24 @@ function Overview() {
   const { isFounder, user } = useSession();
   const editor = useEditor();
   const q = useGet<Dash>('/dashboard');
+  const attn = useAttention();
   const [openTask, setOpenTask] = useState<number | null>(null);
   const done = useAct((id: number) => api.put(`/tasks/${id}`, { status: 'done' }), 'Nice — task marked as done');
   if (q.isError) return <ErrorBox error={q.error} retry={() => void q.refetch()} />;
   if (!q.data) return <Skeleton kind="dash" />;
   const d = q.data;
   const k = d.kpi;
-  const t = today();
-  const att: Att[] = [];
-  (d.overdue_invoices ?? []).forEach((i) => att.push({ kind: 'Invoice', when: String(i.due_date), title: `${i.client_name} owes ${money(i.balance)}`, sub: `${i.number} · was due ${fmtDate(i.due_date)}`, link: `/invoices/${i.id}` }));
-  (d.overdue_tasks ?? []).forEach((x) => att.push({ kind: 'Task', when: String(x.due_date), title: String(x.title), sub: `${x.assignee_name ?? 'Unassigned'} · ${x.project_name ?? 'No project'}`, task: x.id }));
-  (d.followups ?? []).filter((l) => String(l.next_followup) <= t).forEach((l) => att.push({ kind: 'Follow-up', when: String(l.next_followup), title: `Call ${l.name}`, sub: `${l.company ?? ''} · ${pretty(l.stage)}`, link: `/leads/${l.id}` }));
-  (d.renewals ?? []).filter((r) => daysUntil(String(r.renewal_date)) <= 7 && !r.auto_debit).forEach((r) => att.push({ kind: 'Renewal', when: String(r.renewal_date), title: String(r.name), sub: `${r.client_name ?? ''} · ${pretty(r.kind)}`, link: '/renewals' }));
-  (d.deadlines ?? []).filter((p) => daysUntil(String(p.deadline)) <= 3).forEach((p) => att.push({ kind: 'Deadline', when: String(p.deadline), title: String(p.name), sub: String(p.client_name ?? ''), link: `/projects/${p.id}` }));
-  (d.change_requests ?? []).filter((c) => ['requested', 'estimated'].includes(String(c.status))).forEach((c) => att.push({ kind: 'Change request', when: String(c.requested_on ?? t), title: String(c.title), sub: `${c.project_name} · waiting for ${c.status === 'requested' ? 'an estimate' : 'a quote'}`, link: `/projects/${c.project_id}?tab=changes` }));
-  att.sort((a, b) => a.when.localeCompare(b.when));
-  const soon: Att[] = [];
-  (d.followups ?? []).filter((l) => String(l.next_followup) > t && daysUntil(String(l.next_followup)) <= 7).forEach((l) => soon.push({ kind: 'Follow-up', when: String(l.next_followup), title: `Call ${l.name}`, sub: String(l.company ?? ''), link: `/leads/${l.id}` }));
-  (d.renewals ?? []).filter((r) => daysUntil(String(r.renewal_date)) > 7 && daysUntil(String(r.renewal_date)) <= 21).forEach((r) => soon.push({ kind: r.auto_debit ? 'Auto-debit' : 'Renewal', when: String(r.renewal_date), title: String(r.name), sub: String(r.client_name ?? ''), link: '/renewals' }));
-  (d.deadlines ?? []).filter((p) => daysUntil(String(p.deadline)) > 3 && daysUntil(String(p.deadline)) <= 14).forEach((p) => soon.push({ kind: 'Deadline', when: String(p.deadline), title: String(p.name), sub: String(p.client_name ?? ''), link: `/projects/${p.id}` }));
-  soon.sort((a, b) => a.when.localeCompare(b.when));
-
-  const AttLine = ({ a }: { a: Att }) => {
-    const inner = <><span className="kind">{a.kind}</span><div className="grow"><div className="t">{a.title}</div><div className="s">{a.sub}</div></div><Due date={a.when} /></>;
-    return a.link ? <Link to={a.link} className="li">{inner}</Link> : <div className="li" style={{ cursor: 'pointer' }} onClick={() => a.task && setOpenTask(a.task)}>{inner}</div>;
-  };
-  const now = new Date();
+    const now = new Date();
   const greet = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
-  const room = Math.max(0, 6 - Math.min(att.length, 6));
   const stages = LEAD_STAGES.filter(([v]) => !['won', 'closed', 'lost'].includes(v));
   const byValue = stages.some(([v]) => (d.pipeline?.[v]?.v ?? 0) > 0);
   const pmax = Math.max(1, ...stages.map(([v]) => (byValue ? d.pipeline?.[v]?.v : d.pipeline?.[v]?.n) ?? 0));
   const tr = d.trend ?? [];
 
   const attention = (
-    <Panel title="Needs attention" actions={<span className="muted small">{att.length || ''}</span>} bodyClass="flush">
-      {att.length ? <div className="list">{att.slice(0, 7).map((a, i) => <AttLine key={i} a={a} />)}</div> : <div className="empty mini iconic"><span className="em-i"><Icon name="check" /></span><span>Nothing is overdue or waiting on you. Good place to be.</span></div>}
-      {room > 0 && soon.length > 0 && <><div className="sub-h">Coming up</div><div className="list">{soon.slice(0, att.length ? room - 1 || 1 : 3).map((a, i) => <AttLine key={i} a={a} />)}</div></>}
+    <Panel title="Needs attention" actions={<Link to="/actions">{attn.data ? `See all ${attn.data.total}` : 'See all'}</Link>} bodyClass="flush">
+      {attn.data?.items.length ? <div className="list">{attn.data.items.slice(0, 8).map((i) => <AttentionRow key={i.key} i={i} />)}</div>
+        : <div className="empty mini iconic"><span className="em-i"><Icon name="check" /></span><span>Nothing is overdue or waiting on you. Good place to be.</span></div>}
     </Panel>
   );
   const myTasks = (
@@ -118,11 +96,11 @@ function Overview() {
   return (
     <>
       <div className="hello"><h1>{greet}, {user.name.split(' ')[0]}</h1>
-        <div className="sub">{now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} · {att.length ? `${plural(att.length, 'thing')} need${att.length === 1 ? 's' : ''} attention` : 'all clear'}</div></div>
+        <div className="sub">{now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} · {attn.data?.total ? `${plural(attn.data.total, 'thing')} need${attn.data.total === 1 ? 's' : ''} attention` : 'all clear'}</div></div>
       <Kpis items={[
         { label: 'Collected this month', value: money(k.month_income), sub: `Spent ${money(k.month_expense)}` },
         { label: 'Net this month', value: money(net), tone: net < 0 ? 'bad' : undefined, sub: 'Collected − spent' },
-        { label: 'Outstanding', value: money(k.receivables), sub: k.overdue.n ? <span className="neg">{money(k.overdue.v)} overdue</span> : 'Nothing overdue', to: '/invoices' },
+        { label: 'Still to get', value: money(k.unbilled?.to_get ?? 0), tone: k.unbilled?.to_get ? 'warn' : 'good', sub: k.unbilled?.overdue ? <span className="neg">{money(k.unbilled.overdue)} overdue</span> : k.unbilled?.to_get ? `From ${plural(k.unbilled.clients, 'client')}` : 'Everything is paid', to: '/analytics?tab=receivables' },
         { label: 'Open pipeline', value: money(k.open_leads.v), sub: plural(k.open_leads.n, 'open deal'), to: '/leads' },
         { label: 'Cash in bank', value: money(k.cash), sub: `${money(k.mrr)}/mo maintenance income`, to: '/finance?tab=accounts' },
       ]} />
@@ -200,31 +178,19 @@ function Overview() {
 }
 
 export default function Dashboard() {
-  const { isFounder, can, user } = useSession();
+  const { isFounder, user } = useSession();
   const editor = useEditor();
   const nav = useNavigate();
-  const [tab, setTab] = useParam('tab', 'overview');
-  const tabs = [
-    { key: 'overview', label: 'Overview' },
-    ...(can('leads') ? [{ key: 'sales', label: 'Sales' }] : []),
-    { key: 'delivery', label: 'Delivery' },
-    ...(isFounder ? [{ key: 'finance', label: 'Finance' }] : []),
-  ];
-  const active = tabs.some((t) => t.key === tab) ? tab : 'overview';
   return (
     <Page title="Home" crumbs={<b>Home</b>}
       actions={isFounder ? (
         <>
+          <Link className="btn" to="/analytics"><Icon name="activity" />Analytics</Link>
           <button type="button" className="btn" onClick={() => editor.open({ resource: 'leads', defaults: { owner_id: user.id }, onDone: (l) => l && nav(`/leads/${l.id}`) })}><Icon name="plus" />Lead</button>
           <Link className="btn primary" to="/invoices/new"><Icon name="plus" />Invoice</Link>
         </>
       ) : <Link className="btn primary" to="/tasks">Open my work</Link>}>
-      {tabs.length > 1 && <Tabs tabs={tabs} active={active} onChange={setTab} />}
-      {active === 'overview' && <Overview />}
-      {active === 'sales' && <SalesAnalytics showTables={false} />}
-      {active === 'delivery' && <DeliveryAnalytics />}
-      {active === 'finance' && isFounder && <FinanceAnalytics />}
-      {PRIORITIES.length ? null : null}
+      <Overview />
     </Page>
   );
 }

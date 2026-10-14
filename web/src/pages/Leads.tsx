@@ -1,4 +1,4 @@
-import { CLOSED_STAGES, FOLLOWUP_ROUNDS, FOLLOWUP_STATUSES, LEAD_PRIORITIES, LEAD_STAGES, MARKETS, STAGE_PROB, compact, labelOf } from '@crm/shared';
+import { addDays, today, CLOSED_STAGES, FOLLOWUP_ROUNDS, FOLLOWUP_STATUSES, LEAD_PRIORITIES, LEAD_STAGES, MARKETS, STAGE_PROB, compact, labelOf } from '@crm/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEditor } from '../forms/RecordEditor';
@@ -11,24 +11,33 @@ import { DataTable, type Column } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Kanban } from '../ui/Kanban';
 import { Page } from '../ui/Page';
-import { Badge, Due, FollowupStatus, Heat, LogoSq, Seg, Who } from '../ui/primitives';
-import { csvUrl } from '../lib/hooks';
+import { LogContactModal } from '../components/LeadModals';
+import { Popover } from '../ui/Popover';
+import { useRef, useState } from 'react';
+import { Badge, Due, ErrorBox, FollowupStatus, Heat, LogoSq, Seg, Who } from '../ui/primitives';
+import { ExportMenu } from '../ui/ExportMenu';
 import { Link } from 'react-router-dom';
 
 const STAGE_TONE: Record<string, string> = { new: 'var(--faint)', contacted: 'var(--blue)', qualified: '#4f8fb8', meeting: '#5b7fd6', proposal: 'var(--accent)', negotiation: 'var(--plum)', won: 'var(--green)', closed: 'var(--muted)', lost: 'var(--red)', nurture: '#c47f17' };
 const FILTERS = ['department', 'category', 'priority', 'market', 'owner_id', 'source', 'followup_status'] as const;
 
-export function LeadCard({ l }: { l: Row }) {
+export function LeadCard({ l, menu }: { l: Row; menu?: (anchor: HTMLElement, l: Row) => void }) {
   const ended = (CLOSED_STAGES as readonly string[]).includes(String(l.stage));
   return (
     <>
-      <div className="t">{String(l.company || l.name)}</div>
-      <div className="s">{[l.company && l.company !== l.name ? l.name : '', l.department].filter(Boolean).join(' · ') || String(l.city ?? '')}</div>
+      <div className="row" style={{ alignItems: 'flex-start' }}>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="t">{String(l.company || l.name)}</div>
+          <div className="s">{[l.company && l.company !== l.name ? l.name : '', l.department].filter(Boolean).join(' · ') || String(l.city ?? '')}</div>
+        </div>
+        {menu && <button type="button" className="btn ghost sm icon" aria-label={`Actions for ${String(l.company || l.name)}`} aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); menu(e.currentTarget, l); }}><Icon name="chevDown" /></button>}
+      </div>
+      {l.client_id && !ended ? <div className="s" style={{ marginTop: 3 }}><span className="tag blue">Existing client</span></div> : null}
       <div className="f">
         <Heat value={l.priority} />
         {Number(l.value) > 0 && <b className="tnum">{money(l.value)}</b>}
         <span className="grow" />
-        {!ended && l.next_followup ? <Due date={l.next_followup} /> : null}
+        {!ended && l.next_followup ? <Due date={l.next_followup} /> : !ended ? <span className="faint small" title="No follow-up date">no date</span> : null}
         {l.owner_name ? <Who name={String(l.owner_name).split(' ')[0]} /> : null}
       </div>
     </>
@@ -48,11 +57,15 @@ export default function Leads() {
   const showClosed = sp.get('closed') === '1';
   const setParam = (k: string, v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
 
-  const stats = useGet<{ total: { open: number; pipeline: number; weighted: number; conversion: number; due_today: number; overdue: number }; by_department: { name: string; leads: number }[] }>('/analytics/sales');
+  const stats = useGet<{ total: { open: number; pipeline: number; weighted: number; conversion: number; due_today: number; overdue: number; no_date: number }; by_department: { name: string; leads: number }[] }>('/analytics/sales');
   const params = { ...f, q: q || undefined };
   const board = useQuery({ queryKey: ['rows', 'leads-board', params], queryFn: () => api.page<Row>(`/leads${qs({ ...params, limit: 500 })}`), enabled: view === 'board' });
   const move = useAct(({ id, stage, lost_reason }: { id: number; stage: string; lost_reason?: string }) => api.put(`/leads/${id}`, { stage, ...(lost_reason ? { lost_reason } : {}) }), 'Stage updated');
   const t = stats.data?.total;
+  const [menu, setMenu] = useState<{ anchor: HTMLElement; lead: Row } | null>(null);
+  const [logging, setLogging] = useState<Row | null>(null);
+  const setDate = useAct(({ id, next_followup }: { id: number; next_followup: string }) => api.put(`/leads/${id}`, { next_followup }), 'Follow-up scheduled');
+  void useRef;
 
   const depts = [...new Set([...settingList(lookups, 'lead_services'), ...settingList(lookups, 'lead_products'), ...(stats.data?.by_department ?? []).map((d) => d.name).filter((n) => n !== 'Not set')])];
   const count = (d: string) => stats.data?.by_department.find((x) => x.name === d)?.leads ?? 0;
@@ -102,13 +115,13 @@ export default function Leads() {
     <Page title="Pipeline" crumbs={<b>Pipeline</b>}
       actions={<>
         <Seg value={view as 'board' | 'list'} onChange={(v) => { setView(v); try { localStorage.setItem('leadView', v); } catch { /* ignore */ } }} options={[['board', 'Board'], ['list', 'List']]} />
-        {isFounder && <a className="btn" href={csvUrl('leads', { ...f, q })} download title="Download these leads as CSV"><Icon name="download" />CSV</a>}
+        {isFounder && <ExportMenu path="/leads/export" params={{ ...f, q }} />}
         <button type="button" className="btn primary" onClick={() => editor.open({ resource: 'leads', defaults: { owner_id: user.id, department: f.department ?? '', category: f.category ?? '' } })}><Icon name="plus" />New lead</button>
       </>}>
       <div className="pt"><div>
         <h1>Pipeline</h1>
         <div className="sub">
-          {t ? <>{plural(t.open, 'open lead')} · pipeline <b style={{ color: 'var(--ink)' }}>{money(t.pipeline)}</b> · weighted {money(t.weighted)} · {t.conversion}% converted · <Link to="/followups">{plural(t.due_today + t.overdue, 'follow-up')} due</Link></> : ' '}
+          {t ? <>{plural(t.open, 'open lead')} · {t.pipeline ? <>pipeline <b style={{ color: 'var(--ink)' }}>{money(t.pipeline)}</b> · weighted {money(t.weighted)}</> : 'no deal values entered yet'} · {t.conversion}% converted · <Link to="/followups">{plural(t.due_today + t.overdue, 'follow-up')} due</Link>{t.no_date ? <> · <Link to="/followups?show=nodate">{t.no_date} with no follow-up date</Link></> : null}</> : ' '}
         </div>
       </div></div>
       <nav className="dept-tabs" aria-label="Department / Product">
@@ -127,13 +140,25 @@ export default function Leads() {
         {view === 'board' && <label className="check" style={{ marginLeft: 'auto' }}><input type="checkbox" checked={showClosed} onChange={(e) => setParam('closed', e.target.checked ? '1' : '')} /><span>Show closed &amp; lost</span></label>}
       </div>
       {view === 'list' ? (
-        <DataTable resource="leads" query={params} columns={cols} noSearch defaultSort="created_at:desc" noun="lead" onRow={(r) => nav(`/leads/${r.id}`)}
+        <DataTable resource="leads" query={params} exportable={false} columns={cols} noSearch defaultSort="created_at:desc" noun="lead" onRow={(r) => nav(`/leads/${r.id}`)}
           filters={[{ key: 'stage', label: 'All stages', options: LEAD_STAGES }, { key: 'followup_round', label: 'Any round', options: FOLLOWUP_ROUNDS }]}
           empty={{ title: 'No leads match', text: 'Clear a filter to see more, or add a new lead.' }} />
-      ) : board.isPending ? <div className="tbl"><div className="empty">Loading…</div></div> : (
-        <Kanban cols={stageCols.map(([v, l]) => ({ v, l, c: STAGE_TONE[v] }))} items={board.data?.rows ?? []} group={(l) => String(l.stage)} card={(l) => <LeadCard l={l} />}
-          head={(list) => (list.length ? compact(list.reduce((s, l) => s + Number(l.value || 0), 0)) : '')} onOpen={(l) => nav(`/leads/${l.id}`)} onMove={(l, stage) => void onMove(l, stage)} />
+      ) : board.isError ? <ErrorBox error={board.error} retry={() => void board.refetch()} /> : board.isPending ? <div className="tbl"><div className="empty">Loading…</div></div> : (
+        <Kanban cols={stageCols.map(([v, l]) => ({ v, l, c: STAGE_TONE[v] }))} items={board.data?.rows ?? []} group={(l) => String(l.stage)} card={(l) => <LeadCard l={l} menu={(anchor, lead) => setMenu({ anchor, lead })} />}
+          head={(list) => (list.length ? compact(list.reduce((s, l) => s + Number(l.value || 0), 0)) : '')} onOpen={(l) => nav(`/leads/${l.id}`)} onMove={(l, stage) => void onMove(l, stage)} colMin={176} />
       )}
+      {menu && (
+        <Popover anchor={menu.anchor} onClose={() => setMenu(null)} className="narrow" placement="below-end">
+          <div className="menu-i" role="menuitem" tabIndex={0} onClick={() => { nav(`/leads/${menu.lead.id}`); setMenu(null); }}><Icon name="arrowUpRight" />Open lead</div>
+          {!(CLOSED_STAGES as readonly string[]).includes(String(menu.lead.stage)) && <div className="menu-i" role="menuitem" tabIndex={0} onClick={() => { setLogging(menu.lead); setMenu(null); }}><Icon name="phone" />Log contact</div>}
+          {!(CLOSED_STAGES as readonly string[]).includes(String(menu.lead.stage)) && [['Follow up tomorrow', 1], ['Follow up in 3 days', 3], ['Follow up next week', 7]].map(([label, days]) => (
+            <div key={String(label)} className="menu-i" role="menuitem" tabIndex={0} onClick={() => { setDate.mutate({ id: menu.lead.id, next_followup: addDays(today(), Number(days)) }); setMenu(null); }}><Icon name="calendar" />{String(label)}</div>
+          ))}
+          <div className="small faint" style={{ padding: "6px 14px" }}>Move to</div>
+          {LEAD_STAGES.filter(([v]) => v !== menu.lead.stage).map(([v, l2]) => <div key={v} className="menu-i" role="menuitem" tabIndex={0} onClick={() => { void onMove(menu.lead, v); setMenu(null); }}>{l2}</div>)}
+        </Popover>
+      )}
+      {logging && <LogContactModal lead={logging} onClose={() => setLogging(null)} />}
       <p className="small muted">Weighted pipeline uses the stage guide: {Object.entries(STAGE_PROB).filter(([k]) => !['won', 'closed', 'lost', 'nurture'].includes(k)).map(([k, v]) => `${labelOf(LEAD_STAGES, k)} ${v}%`).join(', ')}.</p>
     </Page>
   );

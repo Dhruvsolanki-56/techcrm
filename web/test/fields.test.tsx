@@ -17,7 +17,9 @@ const leadForm = () => (FORMS.leads as NonNullable<(typeof FORMS)['leads']>)({ l
 describe('form validation (same rules as the server)', () => {
   it('asks for what is required', () => {
     const e = validate('leads', leadForm(), { company: '', stage: 'new', followup_round: 'not_started' });
-    expect(e.company).toBe('Company / Person is required.');
+    expect(e.name).toBe('Enter a company, a contact person, or pick an existing client.');
+    expect(validate('leads', leadForm(), { client_id: 3, stage: 'new', followup_round: 'not_started' }).name).toBeUndefined(); // an existing client is enough
+    expect(validate('leads', leadForm(), { name: 'Asha', stage: 'new', followup_round: 'not_started' }).name).toBeUndefined(); // so is just a person
   });
   it('checks phone, email, URL and dates', () => {
     const e = validate('leads', leadForm(), { company: 'Acme', stage: 'new', followup_round: 'not_started', phone: '12', email: 'nope', website: 'not a site', next_followup: '2026-02-30' });

@@ -9,10 +9,12 @@ import { DataTable, type Column } from '../ui/DataTable';
 import { Donut, HBars, Legend, LineChart, PALETTE } from '../ui/charts';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
-import { Badge, Kpis, Panel, Tabs, Who } from '../ui/primitives';
-import { AddBtn, Amount, Cell2, editCol, ExportBtn } from './common';
+import { Badge, ErrorBox, Kpis, Panel, Tabs, Who } from '../ui/primitives';
+import { AddBtn, Amount, Cell2, editCol} from './common';
 
 interface Summary {
+  tds?: { deducted: number; claimed: number; to_claim: number; awaiting_certificate: number };
+  still_to_get?: { to_get: number; pending: number; amount: number; overdue: number };
   from: string; to: string; income: { cash: number; tds: number; n: number }; expenses: { v: number; tax: number; n: number }; invoiced: { taxable: number; total: number; tax: number; n: number };
   profit: number; receivables: number; aging: Record<string, number>; trend: { month: string; income: number; expense: number }[]; expense_by_category: { k: string; v: number }[];
   income_by_client: { k: string; v: number }[]; projects: Row[]; gst: { output: number; input: number; net: number }; accounts: Row[]; cash: number; founders: Row[];
@@ -35,9 +37,10 @@ function Overview() {
   const [range, setRange] = useParam('range', 'month');
   const r = rangeFor(range);
   const s = useGet<Summary>('/finance/summary', r);
+  if (s.isError) return <ErrorBox error={s.error} retry={() => void s.refetch()} />;
   if (!s.data) return <div className="tbl"><div className="empty">Loading…</div></div>;
   const d = s.data;
-  const gross = d.income.cash + d.income.tds;
+  const gross = d.income.cash; // what really reached the bank; TDS is a separate tax credit
   return (
     <div className="stack">
       <div className="toolbar">
@@ -45,11 +48,12 @@ function Overview() {
         <span className="muted small">{fmtDate(d.from)} – {fmtDate(d.to)}</span>
       </div>
       <Kpis items={[
-        { label: 'Money in', value: money(gross), sub: `${d.income.n} payments${d.income.tds ? ` · incl. TDS ${money(d.income.tds)}` : ''}`, tone: 'good' },
+        { label: 'Money in', value: money(gross), sub: `${d.income.n} payments`, tone: 'good' },
         { label: 'Money out', value: money(d.expenses.v), sub: `${d.expenses.n} expenses` },
         { label: 'Profit', value: money(d.profit), tone: d.profit < 0 ? 'bad' : 'good', sub: gross ? `${Math.round((100 * d.profit) / gross)}% margin` : '' },
         { label: 'Invoiced', value: money(d.invoiced.total), sub: `${d.invoiced.n} invoices` },
-        { label: 'To collect', value: money(d.receivables), sub: 'All unpaid invoices', tone: d.receivables ? 'warn' : undefined },
+        { label: 'Still to get', value: money(d.still_to_get?.to_get ?? d.receivables), sub: d.still_to_get ? [d.still_to_get.pending ? `${money(d.still_to_get.pending)} invoiced, unpaid` : '', d.still_to_get.amount ? `${money(d.still_to_get.amount)} not invoiced yet` : ''].filter(Boolean).join(' · ') || 'Everything is paid' : 'All unpaid invoices', tone: (d.still_to_get?.to_get ?? d.receivables) ? 'warn' : 'good', to: '/analytics?tab=receivables' },
+        ...(d.tds?.deducted ? [{ label: 'TDS to claim', value: money(d.tds.to_claim), sub: `${money(d.tds.claimed)} claimed so far · in your ITR`, tone: d.tds.to_claim ? 'warn' as const : undefined, to: '/analytics?tab=tds' }] : []),
       ]} />
       <Kpis items={[
         { label: 'Cash in accounts', value: money(d.cash), sub: `${d.accounts.length} accounts` },
@@ -157,7 +161,7 @@ export default function Finance() {
   const [tab, setTab] = useParam('tab', 'overview');
   const tabs = [{ key: 'overview', label: 'Overview' }, { key: 'payments', label: 'Income' }, { key: 'expenses', label: 'Expenses' }, { key: 'bank', label: 'Bank transactions' }, { key: 'accounts', label: 'Accounts & founders' }];
   return (
-    <Page title="Finance" sub="Money in, money out, and what is left." actions={<>{tab === 'payments' && <ExportBtn resource="payments" />}{tab === 'expenses' && <ExportBtn resource="expenses" />}</>}>
+    <Page title="Finance" sub="Money in, money out, and what is left.">
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'overview' && <Overview />}
       {tab === 'payments' && <PaymentsTable />}

@@ -29,7 +29,7 @@ describe('health check', () => {
 });
 
 describe('interns only see their own work', () => {
-  it.each(['/finance/summary', '/invoices', '/quotes', '/payments', '/expenses', '/accounts', '/transfers', '/credentials', '/users', '/audit', '/settings', '/backup', '/leads', '/renewals', '/maintenance_logs/export.csv', '/analytics/finance'])(
+  it.each(['/finance/summary', '/invoices', '/quotes', '/payments', '/expenses', '/accounts', '/transfers', '/credentials', '/users', '/audit', '/settings', '/backup', '/leads', '/renewals', '/maintenance_logs/export.xlsx', '/analytics/finance'])(
     'blocks an intern from %s', async (url) => { expect((await d.K.get(url)).s).toBe(403); },
   );
   it('limits projects, hides budgets, clients and tasks to the intern', async () => {

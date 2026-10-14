@@ -15,3 +15,9 @@ export function purgeEntity(ctx: AppContext, type: string, id: number): void {
 
 /** A readable project code: P-26-003. */
 export const projectCode = (id: number, now = new Date()): string => `P-${String(now.getFullYear()).slice(2)}-${String(id).padStart(3, '0')}`;
+
+/** Which "entity_type" files and notes use for each table. */
+export const ENTITY_TYPE: Record<string, string> = {
+  leads: 'lead', clients: 'client', projects: 'project', tasks: 'task', invoices: 'invoice', quotes: 'quote', change_requests: 'change_request', expenses: 'expense',
+  payments: 'payment', grants: 'grant', renewals: 'renewal', assets: 'asset', milestones: 'milestone', maintenance_logs: 'maintenance',
+};

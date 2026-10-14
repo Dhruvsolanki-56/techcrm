@@ -1,11 +1,12 @@
 import express, { type Request, type Response } from 'express';
-import { addMonths, CLOSED_STAGES, CYCLE_MONTHS, today, validDate, round2, values, FOLLOWUP_ROUNDS, LEAD_STAGES } from '@crm/shared';
+import { SCHEDULE_TEMPLATES, addDays, addMonths, CLOSED_STAGES, CYCLE_MONTHS, today, validDate, round2, values, FOLLOWUP_ROUNDS, LEAD_STAGES } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import type { Engine } from '../crud/engine';
 import { projectCode } from '../domain/entities';
 import { linkInvoiceToChangeRequest, syncChangeRequestWithQuote } from '../domain/changeRequests';
 import { nextNumber } from '../domain/billing';
+import { toPdf, toXlsx } from './exporters';
 import { badRequest, conflict, forbidden, HttpError, need, notFound } from '../shared/errors';
 import { founderOnly } from '../http/middleware';
 import { intOrNull, str } from '../http/validate';
@@ -47,17 +48,18 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
   router.post('/leads/:id/convert', founderOnly, (req: Request, res: Response) => {
     const lead = one('SELECT * FROM leads WHERE id=?', req.params.id);
     if (!lead) throw notFound('Lead not found');
-    if (lead.client_id) throw badRequest('This lead was already converted.');
+    // a lead made for an existing client has its client already: converting it only starts the work
+    if (lead.client_id && lead.stage === 'won') throw badRequest('This lead was already converted.');
+    const existingClient = (lead.client_id as number | null) ?? null;
     const b = (req.body ?? {}) as Record<string, unknown>;
     const u = user(req);
     const quote = b.quote_id ? one('SELECT * FROM quotes WHERE id=? AND lead_id=?', intOrNull(b.quote_id), lead.id) : undefined;
     if (b.quote_id && !quote) throw badRequest('That quotation does not belong to this lead.');
     const out = db.transaction(() => {
-      const clientId = Number(db.prepare('INSERT INTO clients(company,website,city,status,account_manager_id,notes) VALUES(?,?,?,?,?,?)')
+      const clientId = existingClient ?? Number(db.prepare('INSERT INTO clients(company,website,city,status,account_manager_id,notes) VALUES(?,?,?,?,?,?)')
         .run(lead.company || lead.name, lead.website, lead.city, 'active', lead.owner_id, lead.notes).lastInsertRowid);
-      db.prepare('INSERT INTO contacts(client_id,name,email,phone,is_primary) VALUES(?,?,?,?,1)').run(clientId, lead.name, lead.email, lead.phone);
+      if (!existingClient) db.prepare('INSERT INTO contacts(client_id,name,email,phone,is_primary) VALUES(?,?,?,?,1)').run(clientId, lead.name, lead.email, lead.phone);
       db.prepare("UPDATE leads SET client_id=?, stage='won', closed_on=COALESCE(closed_on, ?), next_followup=NULL, updated_at=datetime('now') WHERE id=?").run(clientId, today(), lead.id);
-      db.prepare("UPDATE documents SET entity_type='client', entity_id=? WHERE entity_type='lead' AND entity_id=?").run(clientId, lead.id);
       db.prepare('UPDATE quotes SET client_id=? WHERE lead_id=?').run(clientId, lead.id);
       db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('client',?,?,'system',?)").run(clientId, u.id, `Converted from lead "${lead.name}" (source: ${lead.source || 'n/a'}, expected value ${lead.value || 0})`);
       db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('lead',?,?,'system','Converted to client')").run(lead.id, u.id);
@@ -68,7 +70,11 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
       if (b.create_project) {
         const value = quote ? round2(quote.subtotal - quote.discount) : lead.value || 0;
         projectId = Number(db.prepare("INSERT INTO projects(client_id,name,type,status,budget,manager_id,description) VALUES(?,?,?,'planning',?,?,?)")
-          .run(clientId, str(b.project_name) || `${lead.company || lead.name} — ${lead.department || lead.service || 'Project'}`, lead.service, value, lead.owner_id, [lead.requirement, lead.notes].filter(Boolean).join('\n\n') || null).lastInsertRowid);
+          .run(clientId, str(b.project_name) || `${lead.company || lead.name} — ${lead.department || lead.service || 'Project'}`, lead.service, value, lead.owner_id, lead.requirement || null).lastInsertRowid);
+        // what was discussed with the lead becomes the project's specification, and its files move with it
+        const specs = [lead.specs, lead.notes ? `Notes from the sales conversation:\n${lead.notes}` : ''].filter(Boolean).join('\n\n');
+        db.prepare('UPDATE projects SET specs=? WHERE id=?').run(specs || null, projectId);
+        db.prepare("UPDATE documents SET entity_type='project', entity_id=? WHERE entity_type='lead' AND entity_id=?").run(projectId, lead.id); // the lead's files follow the work
         db.prepare('UPDATE projects SET code=? WHERE id=?').run(projectCode(projectId), projectId);
         if (lead.owner_id) db.prepare('INSERT OR IGNORE INTO project_members(project_id,user_id) VALUES(?,?)').run(projectId, lead.owner_id);
         if (quote) {
@@ -77,10 +83,77 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
           db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('project',?,?,'system',?)").run(projectId, u.id, `Started from accepted quotation ${quote.number} (₹${value.toLocaleString('en-IN')})`);
         }
       }
+      // with no project yet, the lead's files go to the client
+      db.prepare("UPDATE documents SET entity_type='client', entity_id=? WHERE entity_type='lead' AND entity_id=?").run(clientId, lead.id);
       return { client_id: clientId, project_id: projectId };
     })();
     ctx.audit(u, 'convert', 'leads', lead.id, `${lead.name} → client #${out.client_id}`, req.ip);
     res.json(out);
+  });
+
+
+  /* ---------- payment schedule of a project: a ready-made split of the agreed value ---------- */
+  router.post('/projects/:id/schedule', founderOnly, (req: Request, res: Response) => {
+    const p = one('SELECT * FROM projects WHERE id=?', req.params.id);
+    if (!p) throw notFound('Project not found');
+    const tpl = SCHEDULE_TEMPLATES[String((req.body ?? {}).template)];
+    need(tpl, 'Choose a payment schedule.');
+    need(p.budget > 0, 'Set the agreed value of the project first.');
+    db.transaction(() => {
+      // payments already invoiced are kept; the rest of the value is split over a fresh schedule
+      const kept = one('SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM milestones WHERE project_id=? AND invoice_id IS NOT NULL', p.id) as { s: number; n: number };
+      db.prepare('DELETE FROM milestones WHERE project_id=? AND invoice_id IS NULL').run(p.id);
+      let left = round2(Math.max(0, (p.budget as number) - kept.s));
+      const base = left;
+      tpl.items.forEach(([title, kind, percent], i) => {
+        const last = i === tpl.items.length - 1;
+        const amount = last ? left : round2((base * percent) / 100);
+        left = round2(left - amount);
+        if (amount <= 0) return;
+        const due = kind === 'advance' ? p.start_date || today() : last ? p.deadline || null : null;
+        db.prepare('INSERT INTO milestones(project_id,title,kind,percent,amount,due_date,position) VALUES(?,?,?,?,?,?,?)').run(p.id, title, kind, percent, amount, due, kept.n + i + 1);
+      });
+    })();
+    ctx.audit(user(req), 'update', 'projects', p.id, `Payment schedule: ${tpl.label}`, req.ip);
+    res.json(all('SELECT * FROM milestones WHERE project_id=? ORDER BY position', p.id));
+  });
+
+  /* ---------- milestone → draft invoice ---------- */
+  router.post('/milestones/:id/invoice', founderOnly, (req: Request, res: Response) => {
+    const m = one('SELECT ms.*, p.client_id, p.name AS project_name FROM milestones ms JOIN projects p ON p.id=ms.project_id WHERE ms.id=?', req.params.id);
+    if (!m) throw notFound('Payment not found');
+    need(!m.invoice_id, 'This payment has already been invoiced.');
+    need(m.client_id, 'The project has no client yet.');
+    const inv = engine.create('invoices', {
+      user: user(req), ip: req.ip,
+      body: { client_id: m.client_id, project_id: m.project_id, title: `${m.project_name} — ${m.title}`, due_date: addDays(today(), 15), items: [{ description: `${m.project_name} — ${m.title}`, qty: 1, rate: m.amount }] },
+    });
+    db.prepare("UPDATE milestones SET invoice_id=?, reached_on=COALESCE(reached_on, ?), updated_at=datetime('now') WHERE id=?").run(inv.id, today(), m.id);
+    res.status(201).json({ invoice_id: inv.id, number: inv.number });
+  });
+
+  /* ---------- quotation → project (new work for a client who already exists) ---------- */
+  router.post('/quotes/:id/start-project', founderOnly, (req: Request, res: Response) => {
+    const q = one('SELECT * FROM quotes WHERE id=?', req.params.id);
+    if (!q) throw notFound('Quote not found');
+    need(q.client_id, 'Link the quotation to a client first (convert the lead to a client).');
+    need(!q.project_id, 'This quotation already has a project.');
+    need(!q.change_request_id, 'A quotation for a change request belongs to its project.');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const u = user(req);
+    const out = db.transaction(() => {
+      const value = round2(q.subtotal - q.discount);
+      const pid = Number(db.prepare("INSERT INTO projects(client_id,name,status,budget,manager_id,start_date,description) VALUES(?,?,'planning',?,?,?,?)")
+        .run(q.client_id, str(b.project_name) || q.title || `Project ${q.number}`, value, u.id, today(), q.notes ?? null).lastInsertRowid);
+      db.prepare('UPDATE projects SET code=? WHERE id=?').run(projectCode(pid), pid);
+      db.prepare('INSERT OR IGNORE INTO project_members(project_id,user_id) VALUES(?,?)').run(pid, u.id);
+      db.prepare("UPDATE quotes SET project_id=?, status='accepted', updated_at=datetime('now') WHERE id=?").run(pid, q.id);
+      if (q.lead_id) db.prepare("UPDATE leads SET stage='won', closed_on=COALESCE(closed_on, ?), client_id=COALESCE(client_id, ?), next_followup=NULL WHERE id=?").run(today(), q.client_id, q.lead_id);
+      db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('project',?,?,'system',?)").run(pid, u.id, `Started from accepted quotation ${q.number} (₹${value.toLocaleString('en-IN')})`);
+      return pid;
+    })();
+    ctx.audit(u, 'convert', 'quotes', q.id, `${q.number} → project #${out}`, req.ip);
+    res.status(201).json({ project_id: out });
   });
 
   /* ---------- quotation → invoice ---------- */
@@ -138,7 +211,7 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
   });
 
   /* ---------- contact log: every call / WhatsApp / visit … on every lead, newest first, paged ---------- */
-  router.get('/contact-log', (req: Request, res: Response) => {
+  function contactLog(req: Request, everything: boolean): { rows: Row[]; total: number } {
     if (!hasFlag(user(req), 'leads')) throw forbidden();
     const where = ["n.entity_type='lead'", "n.kind NOT IN ('system','history')"];
     const p: unknown[] = [];
@@ -151,13 +224,29 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
     if (typeof req.query.kind === 'string' && /^[a-z]{2,12}$/.test(req.query.kind)) { where.push('n.kind=?'); p.push(req.query.kind); }
     const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
     if (q) { where.push("(n.body LIKE ? ESCAPE '\\' OR l.company LIKE ? ESCAPE '\\' OR l.name LIKE ? ESCAPE '\\')"); const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`; p.push(like, like, like); }
-    const limit = Math.min(Math.max(intOrNull(req.query.limit) ?? 50, 1), 500);
-    const offset = Math.max(intOrNull(req.query.offset) ?? 0, 0);
+    const limit = everything ? 100_000 : Math.min(Math.max(intOrNull(req.query.limit) ?? 50, 1), 500);
+    const offset = everything ? 0 : Math.max(intOrNull(req.query.offset) ?? 0, 0);
     const from = `FROM notes n JOIN leads l ON l.id=n.entity_id LEFT JOIN users u ON u.id=n.user_id WHERE ${where.join(' AND ')}`;
-    res.setHeader('X-Total-Count', String((one(`SELECT COUNT(*) n ${from}`, ...p) as { n: number }).n));
-    res.json(all(`SELECT n.id, date(n.created_at) AS contact_date, n.entity_id AS lead_id, COALESCE(l.company, l.name) AS company, n.kind, n.followup_round, n.body, n.next_followup,
-      u.name AS user_name ${from} ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?`, ...p, limit, offset));
+    return {
+      total: (one(`SELECT COUNT(*) n ${from}`, ...p) as { n: number }).n,
+      rows: all(`SELECT n.id, date(n.created_at) AS contact_date, n.entity_id AS lead_id, COALESCE(l.company, l.name) AS company, n.kind, n.followup_round, n.body, n.next_followup,
+        u.name AS user_name ${from} ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?`, ...p, limit, offset),
+    };
+  }
+  router.get('/contact-log', (req: Request, res: Response) => {
+    const r = contactLog(req, false);
+    res.setHeader('X-Total-Count', String(r.total));
+    res.json(r.rows);
   });
+  for (const fmt of ['xlsx', 'pdf'] as const) {
+    router.get(`/contact-log/export.${fmt}`, async (req: Request, res: Response) => {
+      const rows = contactLog(req, true).rows.map((r) => ({ ...r, outcome: r.body, body: undefined })) as Row[];
+      const out = fmt === 'xlsx' ? await toXlsx('Contact log', rows) : await toPdf('Contact log', 'contact_log', rows);
+      res.setHeader('Content-Type', fmt === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="contact-log-${today()}.${fmt}"`);
+      res.send(out);
+    });
+  }
 
   /* ---------- bank statement lines: match to income / expenses (same amount, within 5 days) ---------- */
   router.post('/bank-match', founderOnly, (req: Request, res: Response) => {

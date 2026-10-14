@@ -1,3 +1,4 @@
+import { addDays, today as localToday } from '@crm/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { round2 } from '@crm/shared';
 import { createDemo, type Demo } from './demo';
@@ -7,7 +8,7 @@ let d: Demo;
 beforeAll(async () => { d = await createDemo(); });
 afterAll(() => d.app.close());
 const q = <R = { v: number }>(sql: string, ...p: unknown[]): R => d.app.ctx.db.prepare(sql).get(...p) as R;
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 
 /** Every number on a dashboard is checked against an independent SQL query over the same database. */
 describe('dashboard', () => {
@@ -39,12 +40,12 @@ describe('finance analytics', () => {
     expect(a.series).toHaveLength(12);
     const inc = a.series.reduce((s: number, r: { income: number }) => s + r.income, 0);
     const exp = a.series.reduce((s: number, r: { expense: number }) => s + r.expense, 0);
-    expect(inc).toBeCloseTo(q('SELECT COALESCE(SUM(amount+COALESCE(tds,0)),0) v FROM payments WHERE date>=?', `${a.months[0]}-01`).v, 2);
+    expect(inc).toBeCloseTo(q('SELECT COALESCE(SUM(amount),0) v FROM payments WHERE date>=?', `${a.months[0]}-01`).v, 2);
     expect(exp).toBeCloseTo(q("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE status='paid' AND date>=?", `${a.months[0]}-01`).v, 2);
     expect(a.totals.net).toBeCloseTo(round2(inc - exp), 2);
     for (const row of a.series) expect(row.net).toBeCloseTo(row.income - row.expense, 2);
     const last = a.series[a.series.length - 1];
-    expect(last.cumulative).toBeCloseTo(a.series.reduce((s: number, r: { net: number }) => s + r.net, 0) + q('SELECT COALESCE(SUM(amount+COALESCE(tds,0)),0) v FROM payments WHERE date<?', `${a.months[0]}-01`).v - q("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE status='paid' AND date<?", `${a.months[0]}-01`).v, 2);
+    expect(last.cumulative).toBeCloseTo(a.series.reduce((s: number, r: { net: number }) => s + r.net, 0) + q('SELECT COALESCE(SUM(amount),0) v FROM payments WHERE date<?', `${a.months[0]}-01`).v - q("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE status='paid' AND date<?", `${a.months[0]}-01`).v, 2);
   });
   it('ranks clients, projects and grants and forecasts the next 60 days', async () => {
     const a = (await d.F.get('/analytics/finance')).j;
@@ -109,7 +110,7 @@ describe('sales analytics', () => {
 
 describe('calendar and search', () => {
   it('puts every dated thing on one calendar', async () => {
-    const items = (await d.F.get(`/calendar?from=${ago(60)}&to=${new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10)}`)).j.items as { type: string }[];
+    const items = (await d.F.get(`/calendar?from=${ago(60)}&to=${addDays(localToday(), 60)}`)).j.items as { type: string }[];
     const types = new Set(items.map((i) => i.type));
     for (const t of ['project', 'task', 'event', 'invoice', 'renewal', 'grant', 'document']) expect(types.has(t), t).toBe(true);
   });

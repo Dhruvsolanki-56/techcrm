@@ -21,6 +21,7 @@ export default function Followups() {
   const editor = useEditor();
   const [sp, setSp] = useSearchParams();
   const [logging, setLogging] = useState<Row | null>(null);
+  const [more, setMore] = useState<Record<string, number>>({});
   const who = sp.get('who') ?? (isFounder ? 'all' : 'mine');
   const department = sp.get('department') ?? '';
   const priority = sp.get('priority') ?? '';
@@ -70,7 +71,7 @@ export default function Followups() {
         <section key={k} className={`panel fu-group fu-${k}`}>
           <div className="panel-h"><h2>{label}</h2><span className="muted small">{list.length}</span></div>
           <div className="fu-list">
-            {[...list].sort(by).map((l) => {
+            {[...list].sort(by).slice(0, 15 + (more[k] ?? 0)).map((l) => {
               const wa = waLink(l.phone);
               return (
                 <div className="fu-row" key={l.id}>
@@ -90,6 +91,11 @@ export default function Followups() {
                 </div>
               );
             })}
+            {list.length > 15 + (more[k] ?? 0) && (
+              <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}>
+                <button type="button" className="btn sm" onClick={() => setMore((m) => ({ ...m, [k]: (m[k] ?? 0) + 25 }))}>Show {Math.min(25, list.length - 15 - (more[k] ?? 0))} more of {list.length - 15 - (more[k] ?? 0)} left</button>
+              </div>
+            )}
           </div>
         </section>
       )) : (

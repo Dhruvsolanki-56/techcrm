@@ -5,6 +5,7 @@ import { useEditor } from '../forms/RecordEditor';
 import { api, type Row } from '../lib/api';
 import { fmtDate } from '../lib/format';
 import { useGet } from '../lib/hooks';
+import { LoadFailed } from '../ui/primitives';
 import { useSession } from '../lib/session';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
@@ -57,6 +58,7 @@ export default function Calendar() {
         <button type="button" className="btn icon" title="Next month" aria-label="Next month" onClick={() => go(new Date(Y, M, 1))}><Icon name="arrowR" /></button>
         {isFounder && <button type="button" className="btn primary" onClick={() => addEvent(t)}><Icon name="plus" />Reminder</button>}
       </>}>
+      <LoadFailed q={q} />
       <div className="pt">
         <div><h1>{first.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h1><div className="sub">Deadlines, due dates, renewals and follow-ups in one view.</div></div>
         <div className="legend">

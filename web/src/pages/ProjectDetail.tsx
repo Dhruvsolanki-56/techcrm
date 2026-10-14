@@ -5,6 +5,8 @@ import { CRTable } from '../components/ChangeRequests';
 import { CredentialsPanel } from '../components/Credentials';
 import { DocsPanel } from '../components/Docs';
 import { ExpensesTable, InvoicesTable, MaintenanceTable, PaymentsTable, QuotesTable } from '../components/FinanceTables';
+import { HistoryPanel } from '../components/HistoryPanel';
+import { PaymentSchedule } from '../components/PaymentSchedule';
 import { Notes } from '../components/Notes';
 import { Highlights, Hl, Meta, Prop, PropsSec, Record, RecHead } from '../components/record';
 import { TaskModal } from '../components/TaskModal';
@@ -69,6 +71,7 @@ export default function ProjectDetail() {
     { key: 'activity', label: 'Activity' },
     ...(isFounder ? [{ key: 'vault', label: 'Credentials' }, { key: 'finance', label: 'Finance' }] : []),
     ...(can('maintenance') || p.status === 'maintenance' ? [{ key: 'care', label: 'Maintenance' }] : []),
+    { key: 'history', label: 'History' },
   ];
 
   return (
@@ -101,16 +104,19 @@ export default function ProjectDetail() {
             {tab === 'tasks' && <TaskBoard query={{ project_id: pid }} onOpen={setOpenTask} />}
             {tab === 'changes' && <CRTable projectId={pid} />}
             {tab === 'files' && <DocsPanel entityType="project" entityId={pid} />}
+            {tab === 'history' && <HistoryPanel resource="projects" id={pid} />}
             {tab === 'activity' && <Notes type="project" id={pid} placeholder="Decisions, client feedback, blockers…" />}
             {tab === 'vault' && isFounder && <CredentialsPanel project_id={pid} client_id={Number(p.client_id) || undefined} />}
             {tab === 'finance' && isFounder && (
               <div className="stack">
                 <Kpis items={[
-                  { label: 'Billed', value: money(p.total_billed), sub: Number(p.revised_value) ? `${Math.round((100 * Number(p.total_billed)) / Number(p.revised_value))}% of ${money(p.revised_value)}` : '' },
+                  { label: 'Invoiced', value: money(p.total_billed), sub: Number(p.revised_value) ? `of ${money(p.revised_value)} agreed` : '' },
                   { label: 'Received', value: money(p.total_received) },
+                  { label: 'Still to get', value: money(p.to_get), tone: Number(p.to_get) > 0 ? 'warn' : 'good', sub: Number(p.to_get) > 0 ? [Number(p.pending_amount) > 0 ? `${money(p.pending_amount)} invoiced, unpaid` : '', Number(p.to_invoice) > 0 ? `${money(p.to_invoice)} not invoiced yet` : ''].filter(Boolean).join(' · ') : 'Everything is paid' },
                   { label: 'Expenses', value: money(p.total_expenses) },
                   { label: 'Profit so far', value: money(Number(p.total_received) - Number(p.total_expenses)), sub: 'Received − expenses', tone: Number(p.total_received) - Number(p.total_expenses) < 0 ? 'bad' : 'good' },
                 ]} />
+                <PaymentSchedule project={p} />
                 <div><SectionH title="Quotations" /><QuotesTable query={{ project_id: pid }} compact /></div>
                 <div><SectionH title="Invoices" /><InvoicesTable query={{ project_id: pid }} projectId={pid} clientId={Number(p.client_id)} compact /></div>
                 <div><SectionH title="Payments" /><PaymentsTable query={{ project_id: pid }} compact defaults={{ client_id: p.client_id, project_id: pid }} /></div>

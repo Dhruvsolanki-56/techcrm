@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { DocsPanel } from '../components/Docs';
 import { QuotesTable } from '../components/FinanceTables';
 import { LogContactModal, ConvertModal } from '../components/LeadModals';
+import { HistoryPanel } from '../components/HistoryPanel';
 import { Notes } from '../components/Notes';
 import { Highlights, Hl, Meta, Prop, PropsSec, Record, RecHead } from '../components/record';
 import { TaskModal } from '../components/TaskModal';
@@ -40,7 +41,7 @@ export default function LeadDetail() {
   const days = Math.max(0, Math.round((Date.now() - new Date(String(l.created_at).replace(' ', 'T') + 'Z').getTime()) / 86_400_000));
   const fuDays = l.next_followup ? daysUntil(String(l.next_followup)) : null;
   const wa = l.phone ? String(l.phone).replace(/\D/g, '') : '';
-  const tabs = [{ key: 'activity', label: 'Activity' }, { key: 'tasks', label: 'Tasks' }, { key: 'files', label: 'Files' }, ...(isFounder ? [{ key: 'quotes', label: 'Quotations' }] : [])];
+  const tabs = [{ key: 'activity', label: 'Activity' }, { key: 'tasks', label: 'Tasks' }, { key: 'files', label: 'Files' }, ...(isFounder ? [{ key: 'quotes', label: 'Quotations' }] : []), { key: 'history', label: 'History' }];
 
   const changeStage = async (stage: string) => {
     let reason: string | undefined;
@@ -56,7 +57,7 @@ export default function LeadDetail() {
     <Page title={String(l.company || l.name)} crumbs={<><Crumb to="/leads">Pipeline</Crumb><b>{String(l.company || l.name)}</b></>}
       actions={<>
         {!closed && <button type="button" className="btn" onClick={() => setLog(true)}><Icon name="phone" />Log contact</button>}
-        {isFounder && !l.client_id && !['lost', 'closed'].includes(String(l.stage)) && <button type="button" className="btn accent" onClick={() => setConvert(true)}><Icon name="check" />Convert to client</button>}
+        {isFounder && !['lost', 'closed', 'won'].includes(String(l.stage)) && <button type="button" className="btn accent" onClick={() => setConvert(true)}><Icon name="check" />{l.client_id ? 'Start the work' : 'Convert to client'}</button>}
         {isFounder && <button type="button" className="btn" onClick={() => nav(`/quotes/new?lead=${lid}`)}>New quotation</button>}
         <button type="button" className="btn" onClick={() => editor.open({ resource: 'leads', record: l, onDone: (r) => { if (!r) nav('/leads'); } })}><Icon name="edit" />Edit</button>
       </>}>
@@ -65,7 +66,7 @@ export default function LeadDetail() {
           <RecHead name={String(l.company || l.name)} refId={l.ref}
             meta={<><Badge value={l.stage} /><Heat value={l.priority} />{l.company && l.company !== l.name ? <Meta>{String(l.name)}</Meta> : null}
               {l.department ? <Meta>{String(l.department)}{l.business_side ? ` · ${String(l.business_side)}` : ''}</Meta> : null}
-              {l.client_id ? <Link to={`/clients/${l.client_id}`}>Now a client →</Link> : null}</>} />
+              {l.client_id ? <Link to={`/clients/${l.client_id}`}>{l.stage === 'won' ? 'Now a client →' : `Existing client: ${String(l.client_name ?? '')} →`}</Link> : null}</>} />
           <Highlights>
             <Hl label="Deal value" value={Number(l.value) ? money(l.value) : '—'} sub={`Probability ${l.probability ?? 0}% · weighted ${money((Number(l.value) * Number(l.probability || 0)) / 100)}`} />
             <Hl label="Next follow-up" value={l.next_followup && !closed ? fmtDate(l.next_followup).replace(/ \d{4}$/, '') : '—'}
@@ -85,7 +86,8 @@ export default function LeadDetail() {
               </div>
             )}
             {tab === 'files' && <DocsPanel entityType="lead" entityId={lid} canUpload={isFounder} />}
-            {tab === 'quotes' && isFounder && <QuotesTable query={{ lead_id: lid }} compact />}
+            {tab === 'quotes' && isFounder && <QuotesTable query={{ lead_id: lid }} compact noAdd />}
+            {tab === 'history' && <HistoryPanel resource="leads" id={lid} />}
           </div>
         </>}
         side={<>
@@ -113,6 +115,9 @@ export default function LeadDetail() {
             <Prop label="Website">{l.website ? <ExtLink url={l.website} /> : null}</Prop>
           </PropsSec>
           <PropsSec title="Requirement / interested in"><div className="doc-text pre">{l.requirement ? String(l.requirement) : <span className="faint">Nothing written yet.</span>}</div></PropsSec>
+          <PropsSec title="Specification">
+            <div className="doc-text pre">{l.specs ? String(l.specs) : <span className="faint">Write what the client wants built — pages, features, integrations. It becomes the project’s specification when the lead is converted.</span>}</div>
+          </PropsSec>
           {l.notes ? <PropsSec title="Notes"><div className="doc-text pre">{String(l.notes)}</div></PropsSec> : null}
         </>} />
       {log && <LogContactModal lead={l} onClose={() => setLog(false)} />}

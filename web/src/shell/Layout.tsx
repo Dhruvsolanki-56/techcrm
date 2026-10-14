@@ -4,6 +4,7 @@ import { useAuthState, useSession } from '../lib/session';
 import { Icon } from '../ui/Icon';
 import { Popover } from '../ui/Popover';
 import { Avatar, Skeleton } from '../ui/primitives';
+import { useAttention } from '../components/Attention';
 import { Bell } from './Bell';
 import { PasswordModal, TwoFactorModal } from './AccountModals';
 import { visibleNav } from './nav';
@@ -46,6 +47,8 @@ export function Layout() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  const att = useAttention();
+  const urgent = (att.data?.counts.critical ?? 0) + (att.data?.counts.high ?? 0);
   const mustChange = user.must_change_password;
   return (
     <div className="app">
@@ -56,7 +59,7 @@ export function Layout() {
           {visibleNav(isFounder, can).map((g, gi) => (
             <div key={gi}>
               {g.group && <div className="nav-h">{g.group}</div>}
-              {g.items.map((i) => <NavLink key={i.to} to={i.to} className={({ isActive }) => (isActive ? 'on' : '')}><Icon name={i.icon} /><span>{i.label}</span></NavLink>)}
+              {g.items.map((i) => <NavLink key={i.to} to={i.to} className={({ isActive }) => (isActive ? 'on' : '')}><Icon name={i.icon} /><span>{i.label}</span>{i.to === '/actions' && urgent > 0 ? <span className="count" aria-label={`${urgent} need attention`}>{urgent}</span> : null}</NavLink>)}
             </div>
           ))}
         </nav>

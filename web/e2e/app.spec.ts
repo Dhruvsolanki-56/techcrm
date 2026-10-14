@@ -46,8 +46,8 @@ test('sign out, wrong password is refused, then sign in again', async () => {
 test('lead → contact log → convert to client with a project', async () => {
   await page.goto('/leads');
   await page.getByRole('button', { name: 'New lead' }).click();
-  await page.getByLabel('Company / Person').fill('Sunrise Dental Clinic');
-  await page.getByLabel('Contact Person').fill('Dr Meera Shah');
+  await page.getByLabel('Company (optional)').fill('Sunrise Dental Clinic');
+  await page.getByLabel('Contact person').fill('Dr Meera Shah');
   await page.getByLabel('Phone / WhatsApp').fill('+91 98765 43210');
   await page.getByLabel('Deal Value (INR)').fill('120000');
   await page.getByRole('button', { name: 'Create lead' }).click();
@@ -91,6 +91,7 @@ test('change request → quotation → accepted → invoice → payment, all lin
   await expect(page).toHaveURL(/\/invoices\/\d+/);
   await expect(page.locator('.sheet')).toContainText('Add online appointment booking');
   await page.getByRole('button', { name: 'Mark as sent' }).click();
+  await expect(page.locator('.toast', { hasText: 'Updated' }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Record payment' }).first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Create payment' }).click();
   await expect(page.locator('.toast', { hasText: 'Payment created' }).first()).toBeVisible();
@@ -138,6 +139,29 @@ test('lists are paged by the server and searchable', async () => {
   await expect(page.locator('tbody tr')).toHaveCount(1);
 });
 
+test('payment schedule: split the value, mark finished, raise the invoice; the action center shows what is ready', async () => {
+  const clients = await api('GET', '/clients?limit=5');
+  const proj = await api('POST', '/projects', { client_id: clients[0].id, name: 'Schedule Demo Portal', status: 'active', budget: 100000 });
+  await page.goto(`/projects/${proj.id}?tab=finance`);
+  await expect(page.getByRole('heading', { name: 'Payment schedule' })).toBeVisible();
+  await page.getByLabel('Set a payment schedule').selectOption({ label: '50% advance, 50% on delivery' });
+  await expect(page.locator('tbody tr', { hasText: 'Advance' })).toContainText('₹50,000');
+  await expect(page.locator('tfoot')).toContainText('Matches the agreed value');
+  await page.locator('tbody tr', { hasText: 'Advance' }).getByRole('button', { name: 'Mark finished' }).click();
+  await expect(page.locator('tbody tr', { hasText: 'Advance' })).toContainText('Ready to invoice');
+
+  await page.goto('/actions');
+  await expect(page.getByText('Ready to invoice: Advance').first()).toBeVisible();
+  await expect(page.locator('.side .count')).toBeVisible();
+
+  await page.goto(`/projects/${proj.id}?tab=finance`);
+  await page.locator('tbody tr', { hasText: 'Advance' }).getByRole('button', { name: 'Raise invoice' }).click();
+  await expect(page).toHaveURL(/\/invoices\/\d+/);
+  await expect(page.locator('.sheet')).toContainText('Schedule Demo Portal — Advance');
+  await page.goto(`/projects/${proj.id}?tab=finance`);
+  await expect(page.locator('tbody tr', { hasText: 'MS-' }).filter({ hasText: 'Advance' })).toContainText('INV/');
+});
+
 test('command palette finds records and jumps to them', async () => {
   await page.goto('/dashboard');
   await page.keyboard.press('Control+k');
@@ -148,13 +172,54 @@ test('command palette finds records and jumps to them', async () => {
   await expect(page).toHaveURL(/\/(clients|leads|projects)\/\d+/);
 });
 
-test('dashboard analytics tabs render with numbers', async () => {
-  await page.goto('/dashboard?tab=finance');
-  await expect(page.getByText('Income, 12 months')).toBeVisible();
-  await page.goto('/dashboard?tab=delivery');
-  await expect(page.getByText('Open change requests').first()).toBeVisible();
-  await page.goto('/dashboard?tab=sales');
-  await expect(page.getByText('Open pipeline').first()).toBeVisible();
+test('analytics: every tab renders, spending can be filtered, received vs pending adds up', async () => {
+  await page.goto('/analytics?tab=receivables');
+  await expect(page.getByText('Still to get').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'By client' })).toBeVisible();
+  await page.goto('/analytics?tab=spending');
+  await expect(page.getByText('Average expense')).toBeVisible();
+  await page.getByLabel('Group by').selectOption('vendor');
+  await expect(page.getByRole('heading', { name: /Spent by vendor/ })).toBeVisible();
+  for (const tab of ['sales', 'delivery', 'income', 'grants', 'subscriptions', 'trends']) {
+    await page.goto(`/analytics?tab=${tab}`);
+    await expect(page.getByText('Something went wrong')).toHaveCount(0);
+    await expect(page.locator('.kpi').first()).toBeVisible();
+  }
+});
+
+test('exports are Excel and PDF only — never CSV', async () => {
+  await page.goto('/leads?view=list');
+  await page.getByRole('button', { name: /Export/ }).click();
+  await expect(page.getByRole('menuitem', { name: /Excel/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /PDF/ })).toBeVisible();
+  await expect(page.getByText('CSV')).toHaveCount(0);
+  const res = await page.request.get('/api/leads/export.xlsx');
+  expect(res.status()).toBe(200);
+  expect(res.headers()['content-type']).toContain('spreadsheetml');
+  expect((await page.request.get('/api/leads/export.pdf')).headers()['content-type']).toBe('application/pdf');
+  expect((await page.request.get('/api/leads/export.csv')).status()).toBe(404);
+});
+
+test('every record keeps its history, files and an editable status', async () => {
+  const clients = await api('GET', '/clients?limit=3');
+  await page.goto('/finance?tab=expenses');
+  await page.getByRole('button', { name: 'Record expense' }).click();
+  await page.getByLabel('Amount').first().fill('777');
+  await page.getByLabel('Category').selectOption({ index: 1 });
+  await page.getByLabel('Vendor').fill('History Vendor');
+  await page.getByRole('button', { name: 'Create expense' }).click();
+  const row = page.locator('tbody tr', { hasText: 'History Vendor' });
+  await row.getByRole('button', { name: /Edit/ }).click();
+  await page.getByLabel('Amount').first().fill('888');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await row.getByRole('button', { name: /Edit/ }).click();
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('₹777');
+  await expect(page.getByRole('dialog')).toContainText('₹888');
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Upload' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  void clients;
 });
 
 test('mobile layout: menu opens, no sideways scrolling', async () => {
@@ -172,7 +237,7 @@ test('mobile layout: menu opens, no sideways scrolling', async () => {
 
 test('accessibility: no serious or critical violations on key screens', async () => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  for (const url of ['/dashboard', '/leads?view=list', '/projects', '/invoices', '/finance']) {
+  for (const url of ['/dashboard', '/actions', '/analytics?tab=receivables', '/analytics?tab=spending', '/leads?view=list', '/projects', '/invoices', '/finance']) {
     await page.goto(url);
     await page.waitForLoadState('networkidle');
     const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();

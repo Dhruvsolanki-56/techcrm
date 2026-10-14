@@ -1,9 +1,11 @@
+import { toPdf, toXlsx } from '../modules/exporters';
 import express, { type Request, type Response } from 'express';
 import { checkDates, kindFor, normalize, check, validDate } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import { forbidden, HttpError, notFound } from '../shared/errors';
 import { isFounder, type User } from '../security/permissions';
+import { ENTITY_TYPE, purgeEntity } from '../domain/entities';
 import { refOf } from './refs';
 import { NONE, type Actor, type ResourceDef, type ResourceMap } from './types';
 
@@ -167,6 +169,13 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
     return rows.map((r) => shape(def, r, user) as Row);
   }
 
+  const SKIP = new Set(['updated_at', 'created_at', 'created_by']);
+  const logHistory = (table: string, id: number, user: User, action: string, changes: { field: string; from?: unknown; to?: unknown }[]): void => {
+    if (action === 'update' && !changes.length) return;
+    db.prepare('INSERT INTO history(entity,entity_id,action,user_id,user_name,changes) VALUES(?,?,?,?,?,?)').run(table, id, action, user.id, user.name, JSON.stringify(changes));
+  };
+  const plain = (v: unknown): unknown => (v !== null && typeof v === 'object' ? JSON.stringify(v) : v ?? null);
+
   const getRow = (def: ResourceDef, id: number): Row | undefined => db.prepare(`${def.select} WHERE ${def.alias}.id=?`).get(id) as Row | undefined;
 
   function create(name: string, actor: Actor): Row {
@@ -187,6 +196,7 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
     });
     const id = run();
     const row = getRow(def, id) as Row;
+    logHistory(def.table, id, user, 'create', Object.keys(data).filter((k) => !SKIP.has(k) && data[k] !== null && data[k] !== '').map((k) => ({ field: k, to: plain(data[k]) })));
     ctx.audit(user, 'create', def.table, id, def.label(row), actor.ip);
     return shape(def, row, user) as Row;
   }
@@ -210,6 +220,8 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
       def.after?.('update', getRow(def, existing.id) as Row, existing, actor);
     })();
     const row = getRow(def, existing.id) as Row;
+    const same = (a: unknown, b: unknown): boolean => String(plain(a) ?? '') === String(plain(b) ?? '');
+    logHistory(def.table, existing.id, actor.user, 'update', cols.filter((k) => !SKIP.has(k) && !same(existing[k], data[k])).map((k) => ({ field: k, from: plain(existing[k]), to: plain(data[k]) })));
     ctx.audit(actor.user, 'update', def.table, existing.id, def.label(row), actor.ip);
     return shape(def, row, actor.user) as Row;
   }
@@ -224,19 +236,28 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
     db.transaction(() => {
       db.prepare(`DELETE FROM ${def.table} WHERE id=?`).run(hit.row.id);
       def.onDelete?.(hit.row.id, hit.row);
+      const type = ENTITY_TYPE[def.table];
+      if (type) purgeEntity(ctx, type, hit.row.id); // its files and notes go with it
     })();
+    logHistory(def.table, hit.row.id, actor.user, 'delete', [{ field: 'record', from: def.label(hit.row) }]);
     ctx.audit(actor.user, 'delete', def.table, hit.row.id, def.label(hit.row), actor.ip);
   }
 
-  return { scoped, list, query, create, update, remove, resources };
+  /** Who changed what on one record, newest first. */
+  function historyOf(name: string, id: number, user: User): Row[] {
+    if (!scoped(name, id, user)) throw notFound();
+    const def = resources[name] as ResourceDef;
+    return (db.prepare('SELECT * FROM history WHERE entity=? AND entity_id=? ORDER BY id DESC LIMIT 200').all(def.table, id) as Row[]).map((r) => {
+      let changes: { field: string; from?: unknown; to?: unknown }[] = [];
+      try { changes = JSON.parse(r.changes || '[]'); } catch { /* empty */ }
+      if (!isFounder(user)) changes = changes.filter((c) => !(def.founderCols ?? []).includes(c.field));
+      return { ...r, changes };
+    });
+  }
+
+  return { scoped, list, query, create, update, remove, historyOf, resources };
 }
 export type Engine = ReturnType<typeof createEngine>;
-
-const csvCell = (v: unknown): string => {
-  const s = v == null ? '' : String(v);
-  const formula = /^[=+\-@]/.test(s);
-  return /[",\n\r]/.test(s) || formula ? `"${(formula ? "'" : '') + s.replace(/"/g, '""')}"` : s;
-};
 
 /** A whole number, or undefined: "12abc" and "1 OR 1=1" are not numbers. */
 const intParam = (v: unknown): number | undefined => (/^-?\d{1,15}$/.test(String(v ?? '')) ? Number(v) : undefined);
@@ -256,6 +277,14 @@ export function crudRouter(ctx: AppContext, engine: Engine): express.Router {
     return name;
   };
 
+  router.get('/history', (req: Request, res: Response) => {
+    const name = String(req.query.entity ?? '');
+    if (!Object.hasOwn(engine.resources, name)) throw notFound('Unknown resource');
+    const id = intParam(req.query.entity_id);
+    if (id === undefined) throw notFound();
+    res.json(engine.historyOf(name, id, req.user as User));
+  });
+
   router.get('/:res', (req: Request, res: Response) => {
     const name = known(req);
     const { rows, total } = engine.list(name, req.user as User, {
@@ -266,19 +295,23 @@ export function crudRouter(ctx: AppContext, engine: Engine): express.Router {
     res.json(rows);
   });
 
-  router.get('/:res/export.csv', (req: Request, res: Response) => {
+  /** Excel or PDF of exactly what the list shows (same filters and search), every matching row. */
+  const exportList = (format: 'xlsx' | 'pdf') => async (req: Request, res: Response): Promise<void> => {
     const name = known(req);
     const user = req.user as User;
     if (!isFounder(user)) throw forbidden();
-    const { rows } = engine.list(name, user, { all: true, query: req.query as Record<string, unknown> });
+    const { rows } = engine.list(name, user, { all: true, q: typeof req.query.q === 'string' ? req.query.q : '', sort: typeof req.query.sort === 'string' ? req.query.sort : undefined, query: req.query as Record<string, unknown> });
     const def = engine.resources[name] as ResourceDef;
-    const cols = rows.length ? Object.keys(rows[0] as Row).filter((k) => !(def.json ?? []).includes(k)) : [];
-    const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\r\n');
-    ctx.audit(user, 'export', def.table, null, `${rows.length} rows`, req.ip);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${def.table}-${new Date().toISOString().slice(0, 10)}.csv"`);
-    res.send(`\uFEFF${csv}`);
-  });
+    const title = def.table.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    const file = `${def.table}-${new Date().toISOString().slice(0, 10)}.${format}`;
+    const body = format === 'xlsx' ? await toXlsx(title, rows) : await toPdf(title, def.table, rows);
+    ctx.audit(user, 'export', def.table, null, `${rows.length} rows (${format})`, req.ip);
+    res.setHeader('Content-Type', format === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
+    res.send(body);
+  };
+  router.get('/:res/export.xlsx', exportList('xlsx'));
+  router.get('/:res/export.pdf', exportList('pdf'));
 
   router.get('/:res/:id', (req: Request, res: Response) => {
     const name = known(req);

@@ -9,13 +9,15 @@ import { Empty, ErrorBox } from './ui/primitives';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const page = (load: () => Promise<{ default: React.ComponentType<any> }>) => lazy(load);
 const Dashboard = page(() => import('./pages/Dashboard'));
+const ActionCenter = page(() => import('./pages/ActionCenter'));
 const Tasks = page(() => import('./pages/Tasks'));
 const Calendar = page(() => import('./pages/Calendar'));
 const Leads = page(() => import('./pages/Leads'));
 const LeadDetail = page(() => import('./pages/LeadDetail'));
 const Followups = page(() => import('./pages/Followups'));
 const ContactLog = page(() => import('./pages/ContactLog'));
-const SalesReport = page(() => import('./pages/SalesReport'));
+const Analytics = page(() => import('./pages/Analytics'));
+const GrantDetail = page(() => import('./pages/GrantDetail'));
 const Clients = page(() => import('./pages/Clients'));
 const ClientDetail = page(() => import('./pages/ClientDetail'));
 const Quotes = page(() => import('./pages/Quotes'));
@@ -52,13 +54,15 @@ export function App() {
           <Route element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
+            <Route path="actions" element={<ActionCenter />} />
             <Route path="tasks" element={<Tasks />} />
             <Route path="calendar" element={<Calendar />} />
             <Route path="leads" element={<Leads />} />
             <Route path="leads/:id" element={<LeadDetail />} />
             <Route path="followups" element={<Followups />} />
             <Route path="contact-log" element={<ContactLog />} />
-            <Route path="sales-report" element={<SalesReport />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="sales-report" element={<Navigate to="/analytics?tab=sales" replace />} />
             <Route path="clients" element={<Clients />} />
             <Route path="clients/:id" element={<ClientDetail />} />
             <Route path="quotes" element={<Quotes />} />
@@ -72,6 +76,7 @@ export function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="renewals" element={<Renewals />} />
             <Route path="grants" element={<Grants />} />
+            <Route path="grants/:id" element={<GrantDetail />} />
             <Route path="finance" element={<Finance />} />
             <Route path="assets" element={<Assets />} />
             <Route path="vault" element={<Vault />} />

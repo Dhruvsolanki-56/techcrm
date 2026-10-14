@@ -2,6 +2,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CredentialsPanel } from '../components/Credentials';
 import { DocsPanel } from '../components/Docs';
 import { ExpensesTable, InvoicesTable, MaintenanceTable, PaymentsTable, QuotesTable } from '../components/FinanceTables';
+import { HistoryPanel } from '../components/HistoryPanel';
 import { Notes } from '../components/Notes';
 import { Highlights, Hl, Meta, Prop, PropsSec, Record, RecHead } from '../components/record';
 import { useEditor } from '../forms/RecordEditor';
@@ -10,6 +11,7 @@ import { fmtDate, money } from '../lib/format';
 import { useGet, useParam, useRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import { Icon } from '../ui/Icon';
+import { DataTable } from '../ui/DataTable';
 import { Page, SectionH } from '../ui/Page';
 import { Avatar, Badge, Crumb, Empty, ErrorBox, ExtLink, Panel, Skeleton, Tabs, Who } from '../ui/primitives';
 import { RenewalsTable } from './Renewals';
@@ -33,11 +35,13 @@ export default function ClientDetail() {
   const links = (projects.data ?? []).filter((p) => p.live_url || p.staging_url || p.repo_url || p.design_url || p.tech_stack);
   const tabs = [
     { key: 'projects', label: 'Projects' },
+    { key: 'opps', label: 'New work' },
     { key: 'activity', label: 'Activity' },
     ...(isFounder ? [{ key: 'billing', label: 'Quotes, invoices & payments' }] : []),
     { key: 'files', label: 'Files' },
     ...(isFounder ? [{ key: 'vault', label: 'Credentials' }] : []),
     ...(can('maintenance') ? [{ key: 'care', label: isFounder ? 'Maintenance & renewals' : 'Maintenance' }] : []),
+    { key: 'history', label: 'History' },
   ];
 
   return (
@@ -53,7 +57,7 @@ export default function ClientDetail() {
           <RecHead name={String(c.company)} refId={c.ref} meta={<><Badge value={c.status} />{c.industry ? <Meta>{String(c.industry)}</Meta> : null}{c.city ? <Meta>{String(c.city)}</Meta> : null}</>} />
           <Highlights>
             {isFounder && <Hl label="Received to date" value={money(c.lifetime_received)} />}
-            {isFounder && <Hl label="Outstanding" value={money(c.outstanding)} sub={Number(c.outstanding) > 0 ? 'Unpaid invoices' : 'All settled'} tone={Number(c.outstanding) > 0 ? 'bad' : ''} />}
+            {isFounder && <Hl label="Still to get" value={money(c.to_get)} sub={Number(c.to_get) > 0 ? (Number(c.outstanding) > 0 ? `${money(c.outstanding)} invoiced, unpaid` : 'Not invoiced yet') : 'All settled'} tone={Number(c.outstanding) > 0 ? 'bad' : ''} />}
             <Hl label="Projects" value={String(c.project_count)} sub={Number(c.active_projects) ? `${c.active_projects} active` : ''} />
             <Hl label="Client since" value={fmtDate(c.created_at).replace(/ \d{4}$/, '')} sub={fmtDate(c.created_at).slice(-4)} />
           </Highlights>
@@ -80,7 +84,19 @@ export default function ClientDetail() {
                 </Panel>
               </div>
             )}
+            {tab === 'opps' && (
+              <DataTable resource="leads" query={{ client_id: cid }} compact noRef noun="opportunity" onRow={(r) => nav(`/leads/${r.id}`)}
+                toolbar={<button type="button" className="btn primary" onClick={() => editor.open({ resource: 'leads', defaults: { client_id: cid }, onDone: (l) => l && nav(`/leads/${l.id}`) })}><Icon name="plus" />New lead for this client</button>}
+                columns={[
+                  { key: 'requirement', label: 'Opportunity', render: (r) => <div><div className="t1">{String(r.requirement || r.department || 'New work')}</div><div className="t2">{String(r.ref)} · added {fmtDate(r.created_at)}</div></div> },
+                  { key: 'stage', label: 'Stage', render: (r) => <Badge value={r.stage} /> },
+                  { key: 'next_followup', label: 'Next follow-up', render: (r) => (r.next_followup ? fmtDate(r.next_followup) : <span className="faint">—</span>) },
+                  { key: 'value', label: 'Value', num: true, render: (r) => (Number(r.value) ? money(r.value) : <span className="faint">—</span>) },
+                ]}
+                empty={{ title: 'No new work in the pipeline', text: 'Upsell, a new feature set or a second project: add it as a lead so it gets follow-ups, quotations and the same tracking.' }} />
+            )}
             {tab === 'activity' && <Notes type="client" id={cid} />}
+            {tab === 'history' && <HistoryPanel resource="clients" id={cid} />}
             {tab === 'billing' && isFounder && (
               <div className="stack">
                 <div><SectionH title="Quotations" /><QuotesTable query={{ client_id: cid }} compact /></div>

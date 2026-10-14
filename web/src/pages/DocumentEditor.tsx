@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DocsPanel } from '../components/Docs';
 import { PaymentsTable } from '../components/FinanceTables';
+import { HistoryPanel } from '../components/HistoryPanel';
 import { Notes } from '../components/Notes';
 import { useEditor } from '../forms/RecordEditor';
 import { api, type Row } from '../lib/api';
@@ -31,7 +32,7 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
     change_request_id: String(doc?.change_request_id ?? defaults.cr ?? ''),
     kind: String(doc?.kind ?? 'invoice'), title: String(doc?.title ?? (lead ? `Proposal for ${lead.company || lead.name}` : '')), issue_date: String(doc?.issue_date ?? today()),
     due_date: String(doc?.due_date ?? addDays(today(), 15)), valid_until: String(doc?.valid_until ?? addDays(today(), 30)), number: String(doc?.number ?? ''),
-    tax_type: String(doc?.tax_type ?? s.default_tax_type ?? 'none'), tax_rate: String(doc?.tax_rate ?? s.default_tax_rate ?? 18), discount: String(doc?.discount ?? 0),
+    tax_type: String(doc?.tax_type ?? (s.gstin ? s.default_tax_type : 'none') ?? 'none'), tax_rate: String(doc?.tax_rate ?? s.default_tax_rate ?? 18), discount: String(doc?.discount ?? 0),
     terms: String(doc?.terms ?? (isInvoice ? s.terms_invoice : s.terms_quote) ?? ''), notes: String(doc?.notes ?? ''),
   }));
   const [items, setItems] = useState<Item[]>(() => ((doc?.items as Item[] | undefined)?.length ? (doc?.items as Item[]).map((i) => ({ ...i })) : [{ description: '', hsn: '', qty: 1, rate: '' }]));
@@ -78,7 +79,7 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
 
   return (
     <Modal title={doc ? `Edit ${label} ${String(doc.number)}` : `New ${label}`} size="xl" dirty={dirty} onClose={onClose}
-      sub={doc ? String(doc.client_name ?? doc.lead_name ?? '') : isInvoice ? 'Saved as a draft until you mark it as sent.' : 'A priced proposal you can later turn into an invoice.'}
+      sub={doc ? String(doc.client_name ?? doc.lead_name ?? '') : isInvoice ? 'A bill. Once sent it counts as money owed to you (and as GST). Saved as a draft until you send it.' : 'An offer. Nothing is owed until the client accepts; then start the project or raise the invoice.'}
       footer={<>
         <button type="button" className="btn" onClick={onClose}>Cancel</button>
         {canSend ? (
@@ -183,12 +184,14 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
   const toInvoice = useAct(() => api.post<{ invoice_id: number }>(`/quotes/${d.id}/to-invoice`), 'Draft invoice created', (r) => nav(`/invoices/${r.invoice_id}`));
   const dup = useAct(() => api.post<Row>(`/${kind}`, { client_id: d.client_id, lead_id: d.lead_id, project_id: d.project_id, title: d.title, items: d.items, discount: d.discount, tax_type: d.tax_type, tax_rate: d.tax_rate, terms: d.terms, notes: d.notes, kind: d.kind }),
     'Duplicated as a new draft', (r) => nav(`/${kind}/${r.id}?edit=1`));
+  const startProject = useAct(() => api.post<{ project_id: number }>(`/quotes/${d.id}/start-project`), 'Project created from the quotation', (r) => nav(`/projects/${r.project_id}?tab=finance`));
   if (!s) return <Skeleton kind="record" />;
 
   const items = (d.items as Item[]) ?? [];
   const title = !isInvoice ? 'QUOTATION' : d.kind === 'proforma' ? 'PROFORMA INVOICE' : s.gstin ? 'TAX INVOICE' : 'INVOICE';
   const half = Number(d.tax_rate) / 2;
-  const balance = Number(d.total) - Number(d.paid_amount || 0);
+  const balance = Math.max(0, Number(d.total) - Number(d.paid_amount || 0));
+  const credit = Math.max(0, Number(d.paid_amount || 0) - Number(d.total));
   const stamp = isInvoice && d.status === 'paid' ? <span className="stamp" style={{ color: '#12805c' }}>PAID</span> : d.status === 'cancelled' ? <span className="stamp" style={{ color: '#c8352f' }}>CANCELLED</span> : null;
   const who = client ? String(client.company) : lead ? String(lead.company || lead.name) : '—';
   const st = String(d.status);
@@ -199,6 +202,7 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
         <div className="row" style={{ gap: 10 }}><h1>{who}</h1><Badge value={d.status} />{d.kind === 'proforma' && <span className="tag">Proforma</span>}</div>
         <div className="sub">{String(d.title ?? '')}{d.quote_number ? <> · from quotation <Link className="ln" to={`/quotes/${d.quote_id}`}>{String(d.quote_number)}</Link></> : null}
           {d.change_request_title ? <> · change request: {String(d.change_request_title)}</> : null}</div>
+        <div className="small muted" style={{ marginTop: 4 }}>{isInvoice ? 'Invoice — a bill for work done or agreed. It is counted as money owed until payments are recorded against it.' : 'Quotation — an offer before any work. It owes nothing and can be changed, rejected or expire; accepting it starts a project or becomes an invoice.'}</div>
       </div></div>
       <div className="no-print row wrap" style={{ gap: 8 }}>
         <button type="button" className="btn" onClick={onEdit}><Icon name="edit" />Edit</button>
@@ -220,18 +224,19 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
             <button type="button" className="btn" onClick={() => setStatus.mutate('rejected')}>Rejected</button>
           </>
         )}
-        {!isInvoice && d.client_id ? <button type="button" className="btn primary" onClick={() => toInvoice.mutate()}>Convert to invoice</button> : null}
+        {!isInvoice && d.client_id && !d.project_id && !d.change_request_id ? <button type="button" className="btn primary" onClick={() => startProject.mutate()}>Accept &amp; start project</button> : null}
+        {!isInvoice && d.client_id ? <button type="button" className="btn" onClick={() => toInvoice.mutate()}>Convert to invoice</button> : null}
       </div>
       <Kpis className="no-print" items={[
         { label: 'Total', value: money2(d.total), sub: d.tax_type === 'none' ? 'No tax' : `incl. ${d.tax_type === 'igst' ? 'IGST' : 'GST'} ${money2(d.tax_amount)}` },
         ...(isInvoice
           ? [{ label: 'Received', value: money2(d.paid_amount || 0), sub: `${pays.length} payment${pays.length === 1 ? '' : 's'}` },
-            { label: 'Balance due', value: money2(balance), sub: st === 'paid' ? 'Settled' : d.due_date ? `Due ${fmtDate(d.due_date)}` : '', tone: balance > 0 && st === 'overdue' ? 'bad' as const : undefined }]
+            { label: 'Balance due', value: money2(balance), sub: credit > 0 ? `Overpaid by ${money2(credit)} — refund or adjust` : st === 'paid' ? 'Settled' : d.due_date ? `Due ${fmtDate(d.due_date)}` : '', tone: balance > 0 && st === 'overdue' ? 'bad' as const : undefined }]
           : [{ label: 'Valid until', value: fmtDate(d.valid_until), sub: st === 'sent' && d.valid_until ? (daysUntil(String(d.valid_until)) < 0 ? 'Expired' : `${daysUntil(String(d.valid_until))} days left`) : '' }]),
         { label: 'Issued', value: fmtDate(d.issue_date), sub: String(d.project_name ?? '') },
       ]} />
       <div className="paper-wrap">
-        <div className="sheet">
+        <div className="sheet" tabIndex={0} role="region" aria-label="Document preview">
           <div className="row spread" style={{ alignItems: 'flex-start' }}>
             <div className="row" style={{ alignItems: 'flex-start', gap: 14 }}>
               {s.logo ? <img src={s.logo} alt="" style={{ maxHeight: 56, maxWidth: 150 }} /> : null}
@@ -283,11 +288,12 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
         </div>
       </div>
       <div className="no-print stack">
-        {isInvoice && <div><SectionH title="Payments received" /><PaymentsTable query={{ invoice_id: d.id }} compact defaults={{ invoice_id: d.id, client_id: d.client_id, project_id: d.project_id }} /></div>}
+        {isInvoice && <div><SectionH title="Payments received" /><PaymentsTable query={{ invoice_id: d.id }} compact defaults={{ invoice_id: d.id, client_id: d.client_id, project_id: d.project_id, ...(balance > 0 ? { amount: balance.toFixed(2) } : {}) }} /></div>}
         <div className="grid-2">
           <div><SectionH title="Attachments" /><DocsPanel entityType={isInvoice ? 'invoice' : 'quote'} entityId={Number(d.id)} /></div>
           <div><SectionH title="Notes" /><Notes type={isInvoice ? 'invoice' : 'quote'} id={Number(d.id)} kinds={false} /></div>
         </div>
+        <div><SectionH title="Changes" /><HistoryPanel resource={kind} id={Number(d.id)} /></div>
       </div>
       {reminder && <ReminderModal d={d} s={s} balance={balance} onClose={() => setReminder(false)} />}
     </>

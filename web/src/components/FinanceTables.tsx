@@ -24,14 +24,14 @@ export function InvoicesTable({ query, projectId, clientId, compact }: { query?:
     { key: 'balance', label: 'Balance', num: true, sort: 'balance', render: (r) => <Amount v={r.balance} neg={r.status === 'overdue'} dash /> },
   ];
   return (
-    <DataTable resource="invoices" query={query} columns={cols} compact={compact} onRow={(r) => nav(`/invoices/${r.id}`)} searchPlaceholder="Search invoices…" noun="invoice" defaultSort="issue_date:desc"
+    <DataTable resource="invoices" query={query} columns={cols} compact={compact} onRow={(r) => nav(`/invoices/${r.id}`)} searchPlaceholder="Search invoices…" noun="invoice" defaultSort="issue_date:desc" dates
       filters={compact ? [] : [{ key: 'status', label: 'All statuses', options: INVOICE_STATUSES }, { key: 'client_id', label: 'Any client', lookup: 'clients' }]}
       toolbar={<button type="button" className="btn primary" onClick={() => nav(`/invoices/new${newQuery.size ? `?${newQuery}` : ''}`)}><Icon name="plus" />New invoice</button>}
       empty={{ title: 'No invoices yet', text: 'Create an invoice from a quotation or from scratch.' }} />
   );
 }
 
-export function QuotesTable({ query, compact }: { query?: Record<string, unknown>; compact?: boolean }) {
+export function QuotesTable({ query, compact, noAdd }: { query?: Record<string, unknown>; compact?: boolean; noAdd?: boolean }) {
   const nav = useNavigate();
   const cols: Column[] = [
     { key: 'number', label: 'Quotation', sort: 'number', render: (r) => <Cell2 top={<b>{String(r.number)}</b>} sub={String(r.title ?? '')} /> },
@@ -45,7 +45,7 @@ export function QuotesTable({ query, compact }: { query?: Record<string, unknown
   return (
     <DataTable resource="quotes" query={query} columns={cols} compact={compact} onRow={(r) => nav(`/quotes/${r.id}`)} searchPlaceholder="Search quotations…" noun="quotation" defaultSort="issue_date:desc"
       filters={compact ? [] : [{ key: 'status', label: 'All statuses', options: QUOTE_STATUSES }, { key: 'client_id', label: 'Any client', lookup: 'clients' }]}
-      toolbar={<button type="button" className="btn primary" onClick={() => nav('/quotes/new')}><Icon name="plus" />New quotation</button>}
+      toolbar={noAdd ? null : <button type="button" className="btn primary" onClick={() => nav('/quotes/new')}><Icon name="plus" />New quotation</button>}
       empty={{ title: 'No quotations yet', text: 'Quote a lead or a change request, then turn the accepted quote into an invoice.' }} />
   );
 }
@@ -56,14 +56,16 @@ export function PaymentsTable({ query, compact, defaults }: { query?: Record<str
   const cols: Column[] = [
     { key: 'date', label: 'Date', cls: 'nowrap', sort: 'date', render: (r) => fmtDate(r.date) },
     { key: 'client_name', label: 'Client', sort: 'client_name', render: (r) => <Cell2 top={String(r.client_name ?? r.grant_name ?? '—')} sub={[r.invoice_number, r.project_name].filter(Boolean).join(' · ')} /> },
-    { key: 'category', label: 'Category', cls: 'opt', sort: 'category', render: (r) => <span className="tag">{String(r.category ?? '—')}</span> },
-    { key: 'method', label: 'Mode', cls: 'opt', render: (r) => <Cell2 top={String(r.method ?? '—')} sub={String(r.account_name ?? '')} /> },
-    { key: 'amount', label: 'Amount', num: true, sort: 'amount', render: (r) => <><Amount v={r.amount} />{Number(r.tds) ? <div className="t2">+ TDS {Number(r.tds).toLocaleString('en-IN')}</div> : null}</> },
+    ...(compact ? [] : [
+      { key: 'category', label: 'Category', cls: 'opt', sort: 'category', render: (r: Record<string, unknown>) => <span className="tag">{String(r.category ?? '—')}</span> } as Column,
+      { key: 'method', label: 'Mode', cls: 'opt', render: (r: Record<string, unknown>) => <Cell2 top={String(r.method ?? '—')} sub={String(r.account_name ?? '')} /> } as Column,
+    ]),
+    { key: 'amount', label: 'Amount', num: true, sort: 'amount', render: (r) => <Amount v={r.amount} /> },
     editCol('payments', true),
   ];
   return (
     <DataTable resource="payments" query={query} columns={cols} compact={compact} noRef={compact} defaultSort="date:desc" searchPlaceholder="Search payments…" noun="payment"
-      filters={compact ? [] : [{ key: 'category', label: 'All categories', options: settingList(lookups, 'income_categories') }, { key: 'account_id', label: 'Any account', lookup: 'accounts' }]}
+      dates filters={compact ? [] : [{ key: 'category', label: 'All categories', options: settingList(lookups, 'income_categories') }, { key: 'client_id', label: 'Any client', lookup: 'clients' }, { key: 'project_id', label: 'Any project', lookup: 'projects' }, { key: 'grant_id', label: 'Any grant', lookup: 'grants' }, { key: 'account_id', label: 'Any account', lookup: 'accounts' }]}
       toolbar={<button type="button" className="btn primary" onClick={() => editor.open({ resource: 'payments', defaults })}><Icon name="plus" />Record payment</button>}
       empty={{ title: 'No payments yet', text: 'Record money received from clients, grants or anyone else.' }} />
   );
@@ -83,7 +85,7 @@ export function ExpensesTable({ query, compact, defaults }: { query?: Record<str
   ];
   return (
     <DataTable resource="expenses" query={query} columns={cols} compact={compact} noRef={compact} defaultSort="date:desc" searchPlaceholder="Search expenses…" noun="expense"
-      filters={compact ? [] : [{ key: 'category', label: 'All categories', options: settingList(lookups, 'expense_categories') }, { key: 'status', label: 'Any status', options: [['paid', 'Completed'], ['pending', 'Pending']] }]}
+      dates filters={compact ? [] : [{ key: 'category', label: 'All categories', options: settingList(lookups, 'expense_categories') }, { key: 'status', label: 'Any status', options: [['paid', 'Completed'], ['pending', 'Pending']] }, { key: 'grant_id', label: 'Any grant', lookup: 'grants' }, { key: 'project_id', label: 'Any project', lookup: 'projects' }, { key: 'paid_by_id', label: 'Paid by anyone', lookup: 'users' }, { key: 'account_id', label: 'Any account', lookup: 'accounts' }]}
       toolbar={<button type="button" className="btn primary" onClick={() => editor.open({ resource: 'expenses', defaults })}><Icon name="plus" />Record expense</button>}
       empty={{ title: 'No expenses yet', text: 'Record what the company spends.' }} />
   );

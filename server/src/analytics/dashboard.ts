@@ -4,7 +4,8 @@ import type { Row } from '../db/connection';
 import type { Engine } from '../crud/engine';
 import { markOverdue } from '../domain/billing';
 import { hasFlag, isFounder, type User } from '../security/permissions';
-import { mrr, recurringCostPerMonth } from './finance';
+import { unbilled } from '../domain/projectMoney';
+import { mrr, recurringCostPerMonth, tdsTotals } from './finance';
 
 /** The Home screen: what needs attention today, the money, the pipeline, and the day-to-day work. */
 export function dashboard(ctx: AppContext, engine: Engine, u: User): Row {
@@ -31,14 +32,16 @@ export function dashboard(ctx: AppContext, engine: Engine, u: User): Row {
   out.kpi = {
     open_leads: one("SELECT COUNT(*) n, COALESCE(SUM(value),0) v FROM leads WHERE stage NOT IN ('won','closed','lost')"),
     active_projects: one("SELECT COUNT(*) n FROM projects WHERE status IN ('planning','active','review')").n,
-    receivables: one("SELECT COALESCE(SUM(total-paid_amount),0) v FROM invoices WHERE kind='invoice' AND status NOT IN ('draft','cancelled','paid')").v,
-    overdue: one("SELECT COALESCE(SUM(total-paid_amount),0) v, COUNT(*) n FROM invoices WHERE kind='invoice' AND status='overdue'"),
+    receivables: one("SELECT COALESCE(SUM(MAX(total-paid_amount,0)),0) v FROM invoices WHERE kind='invoice' AND status NOT IN ('draft','cancelled','paid')").v,
+    overdue: one("SELECT COALESCE(SUM(MAX(total-paid_amount,0)),0) v, COUNT(*) n FROM invoices WHERE kind='invoice' AND status='overdue'"),
     month_income: one('SELECT COALESCE(SUM(amount),0) v FROM payments WHERE date>=?', monthStart).v,
     month_expense: one("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE status='paid' AND date>=?", monthStart).v,
     mrr: mrr(ctx),
     recurring_cost: recurringCostPerMonth(ctx),
     quotes_pending: one("SELECT COUNT(*) n, COALESCE(SUM(total),0) v FROM quotes WHERE status='sent'"),
     open_change_requests: one("SELECT COUNT(*) n, COALESCE(SUM(estimate_amount),0) v FROM change_requests WHERE status IN ('requested','estimated','quoted','approved','in_progress') AND billable=1"),
+    unbilled: unbilled(ctx),
+    tds: tdsTotals(ctx),
     cash: all(`SELECT a.opening_balance
       + COALESCE((SELECT SUM(amount) FROM payments WHERE account_id=a.id),0)
       - COALESCE((SELECT SUM(amount) FROM expenses WHERE account_id=a.id AND paid_by_id IS NULL AND status='paid'),0)
@@ -67,7 +70,7 @@ export function dashboard(ctx: AppContext, engine: Engine, u: User): Row {
   out.work = {
     clients: one("SELECT COUNT(*) n, SUM(status='active') active FROM clients"),
     projects: all('SELECT status k, COUNT(*) n FROM projects GROUP BY status ORDER BY n DESC'),
-    invoices: one("SELECT COUNT(*) n, COALESCE(SUM(total),0) total, COALESCE(SUM(total-paid_amount),0) open FROM invoices WHERE kind='invoice' AND status NOT IN ('draft','cancelled')"),
+    invoices: one("SELECT COUNT(*) n, COALESCE(SUM(total),0) total, COALESCE(SUM(MAX(total-paid_amount,0)),0) open FROM invoices WHERE kind='invoice' AND status NOT IN ('draft','cancelled')"),
   };
   out.change_requests = engine.query('change_requests', u, "cr.status IN ('requested','estimated','quoted','approved','in_progress')", [], 6);
   return out;

@@ -9,7 +9,7 @@
 .tag.plum { background: var(--plum-bg); color: var(--plum); } .tag.blue { background: var(--blue-bg); color: var(--blue); }
 
 /* modal body that holds a split layout needs no padding */
-.modal.xl .modal-b { padding: 0; }
+.modal-b:has(> .pop-split) { padding: 0; }
 .pop-sec { margin-top: 22px; } .pop-sec h3 { font-size: 13.5px; }
 
 /* tables */
@@ -38,3 +38,43 @@ table.t th.sortable { cursor: pointer; user-select: none; }
 
 .prog { white-space: nowrap; }
 .panel-b.flush { padding: 0; }
+
+/* action center */
+.sev { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--faint); }
+.sev-critical { background: var(--red); box-shadow: 0 0 0 3px var(--red-bg); } .sev-high { background: #d99312; } .sev-normal { background: var(--blue); }
+.att-row { text-decoration: none; }
+.att-area { display: inline-flex; align-items: center; gap: 5px; width: 82px; flex: none; font-size: 11.5px; color: var(--muted); }
+.att-area .i { width: 13px; height: 13px; }
+@media (max-width: 760px) { .att-area { display: none; } }
+.nav a .count { margin-left: auto; }
+.nav a:focus-visible { outline-offset: -2px; }
+.side { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.pop-side .row.wrap .btn.sm { height: 24px; padding: 0 8px; }
+
+/* change history */
+.hist-changes { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: 13px; }
+.hist-changes s { text-decoration-thickness: 1px; }
+.hist-arrow { width: 12px; height: 12px; vertical-align: -2px; color: var(--faint); }
+.rec-extra { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+.rec-extra .seg { margin-bottom: 12px; }
+.kanban { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.kcard .row .btn.icon { margin: -4px -6px 0 0; }
+/* board columns must never grow wider than their track, or neighbouring cards overlap and clicks land on the wrong card */
+.kcol { min-width: 0; overflow: hidden; }
+.kcol-b, .kcard { min-width: 0; }
+.kcard .t, .kcard .s { overflow-wrap: anywhere; }
+.kcard .f { flex-wrap: wrap; row-gap: 4px; }
+
+/* Action center */
+.sev-pill { flex: none; width: 74px; text-align: center; font-size: 11px; font-weight: 600; padding: 2px 0; border-radius: 99px; }
+.sev-pill-critical { background: var(--red-bg); color: var(--red); } .sev-pill-high { background: var(--amber-bg); color: var(--amber); } .sev-pill-normal { background: var(--blue-bg); color: var(--blue); }
+button.att-row { width: 100%; text-align: left; font: inherit; background: none; border: 0; cursor: pointer; color: inherit; }
+.att-chev { display: inline-flex; transition: transform .15s; } .att-chev.open { transform: rotate(180deg); }
+.att-kids { background: var(--subtle); border-top: 1px solid var(--line); padding: 4px 0 8px 94px; }
+.att-kid { display: flex; align-items: center; gap: 10px; padding: 7px 16px 7px 0; color: inherit; text-decoration: none; } .att-kid:hover b { text-decoration: underline; } .att-kid span { flex: 1; } .att-kid .i { width: 13px; height: 13px; color: var(--faint); }
+.att-all { display: inline-block; padding: 6px 0; font-size: 12.5px; }
+.ac-money tbody tr { cursor: pointer; }
+.ac-group + .ac-group { margin-top: 18px; }
+.ac-group .panel-h h2 { display: flex; align-items: center; gap: 8px; } .ac-group .panel-h .count { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.ac-more { width: 100%; padding: 10px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font: inherit; cursor: pointer; }
+@media (max-width: 760px) { .sev-pill { width: auto; padding: 2px 8px; } .att-kids { padding-left: 16px; } }

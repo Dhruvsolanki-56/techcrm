@@ -44,12 +44,12 @@ export function nextNumber(ctx: AppContext, table: 'invoices' | 'quotes', prefix
   return head + String(max + 1).padStart(4, '0');
 }
 
-/** Recomputes an invoice's paid amount and status from its payments. */
+/** Recomputes an invoice's paid amount and status from its payments. An invoice is for what the client really pays us: TDS they deduct is never part of it (it is tracked apart, for the ITR). */
 export function refreshInvoice(ctx: AppContext, id: number | null | undefined): void {
   if (!id) return;
   const inv = ctx.db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as Row | undefined;
   if (!inv) return;
-  const paid = (ctx.db.prepare('SELECT COALESCE(SUM(amount + COALESCE(tds,0)),0) s FROM payments WHERE invoice_id=?').get(id) as { s: number }).s;
+  const paid = (ctx.db.prepare('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE invoice_id=?').get(id) as { s: number }).s;
   let status: string = inv.status;
   if (status !== 'draft' && status !== 'cancelled') {
     if (inv.total > 0 && paid >= inv.total - 0.005) status = 'paid';

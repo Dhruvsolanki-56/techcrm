@@ -6,7 +6,7 @@ import type { Row } from '../db/connection';
  */
 export const REF_PREFIX: Record<string, string> = {
   leads: 'LD', clients: 'CL', contacts: 'CT', tasks: 'T', documents: 'DOC', payments: 'PAY', expenses: 'EXP', accounts: 'ACC', transfers: 'TRF',
-  grants: 'GR', assets: 'AST', bank_transactions: 'BNK', renewals: 'REN', maintenance_logs: 'MNT', events: 'EV', change_requests: 'CR',
+  grants: 'GR', assets: 'AST', bank_transactions: 'BNK', renewals: 'REN', maintenance_logs: 'MNT', events: 'EV', change_requests: 'CR', milestones: 'MS',
 };
 
 export function refOf(table: string, row: Row): string | null {

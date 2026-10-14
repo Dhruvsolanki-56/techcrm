@@ -15,6 +15,8 @@ import { readWorkbook, type Sheet } from './xlsx';
 const COMPANY = 'TechSentinals LLP';
 const ACCOUNT = 'TechSentinals bank account';
 const OWN_NAME = 'techsentinals';
+const STRIKAR_PAYMENT_KEY = 'seed:payment:strikar-2';
+const STRIKAR_DATE = '2026-10-14';
 
 export interface TeamMember { name: string; email: string; title: string }
 export const TEAM: TeamMember[] = [
@@ -25,15 +27,15 @@ export const TEAM: TeamMember[] = [
 ];
 
 /** What each project is (the sheet only has a name); fields the sheet does not have stay empty. */
-const PROJECTS: Record<string, { type?: string; status: string; deadline?: string; description: string }> = {
+const PROJECTS: Record<string, { type?: string; status: string; deadline?: string; description: string; value?: number }> = {
   'Inventa Website': { type: 'Website', status: 'completed', description: 'Website design and development for Inventa Systems.' },
   'RotoTech Custom Software Development': { type: 'Custom software', status: 'completed', description: 'Custom software development for RotoTech Systems (Phase 1).' },
   'RotoTech Maintenance & Support (Phase 2)': {
     type: 'Maintenance', status: 'maintenance', deadline: '2026-12-31',
     description: 'Maintenance and support for RotoTech Systems until 31 December 2026, covered by the ₹25,000 advance received on 12 Aug 2026.',
   },
-  'Strikar Lifescience Website': { type: 'Website', status: 'active', description: 'Website design and development for Strikar Lifescience LLP.' },
-  'Vishalwin Foundation NGO Dashboard': { type: 'Dashboard', status: 'active', description: 'NGO dashboard for Vishalwin Foundation covering the Renu program and the Road Safety Guardian Angel program.' },
+  'Strikar Lifescience Website': { type: 'Website', status: 'active', value: 130000, description: 'Website design and development for Strikar Lifescience LLP. Agreed value ₹1.30 lakh, 10% TDS (₹13,000) is deducted by the client.' },
+  'Vishalwin Foundation NGO Dashboard': { type: 'Dashboard', status: 'active', value: 350000, description: 'NGO dashboard for Vishalwin Foundation covering the Renu program and the Road Safety Guardian Angel program.' },
 };
 
 const STAGE: Record<string, string> = { new: 'new', contacted: 'contacted', qualified: 'qualified', demomeeting: 'meeting', proposalsent: 'proposal', negotiation: 'negotiation', converted: 'won', closed: 'closed', lost: 'lost', nurture: 'nurture' };
@@ -400,7 +402,7 @@ export function runSeed(ctx: AppContext, opts: SeedOptions): SeedReport {
       if (!p) continue;
       const pay = one('SELECT MIN(date) a, MAX(date) b, COALESCE(SUM(amount),0) s FROM payments WHERE project_id=?', p.id) as { a: string | null; b: string | null; s: number };
       db.prepare('UPDATE projects SET type=COALESCE(type,?), description=COALESCE(description,?), status=?, deadline=COALESCE(deadline,?), budget=CASE WHEN budget>0 THEN budget ELSE ? END, completed_on=?, start_date=COALESCE(start_date,?) WHERE id=?')
-        .run(info.type ?? null, info.description, info.status, info.deadline ?? null, billed[name] || (info.status === 'maintenance' ? pay.s : 0), info.status === 'completed' ? pay.b : null, info.status === 'maintenance' ? pay.a : null, p.id);
+        .run(info.type ?? null, info.description, info.status, info.deadline ?? null, billed[name] || info.value || (info.status === 'maintenance' ? pay.s : 0), info.status === 'completed' ? pay.b : null, info.status === 'maintenance' ? pay.a : null, p.id);
       sec('project_details');
     }
     for (const c of all('SELECT id FROM clients')) {
@@ -433,6 +435,21 @@ export function runSeed(ctx: AppContext, opts: SeedOptions): SeedReport {
       refreshInvoice(ctx, id);
       sec('invoices');
     }
+    // Strikar's 2nd tranche (not in the sheets yet): ₹65,000 arrived on 14 Oct 2026 and the client deducted ₹13,000 TDS. The invoice is only for what we receive (₹65,000);
+    // the TDS is a tax credit tracked apart for the ITR. Of the ₹1.30L project: ₹1,04,000 received, ₹13,000 TDS, so ₹13,000 is still to be billed and received.
+    const strikar = one("SELECT c.id cid, p.id pid FROM clients c JOIN projects p ON p.client_id=c.id WHERE LOWER(c.company)='strikar lifescience llp' AND LOWER(p.name)='strikar lifescience website'");
+    if (strikar && !seen('payments', STRIKAR_PAYMENT_KEY)) {
+      const id = Number(db.prepare(`INSERT INTO invoices(number,kind,client_id,project_id,title,issue_date,due_date,status,items,subtotal,discount,tax_type,tax_rate,tax_amount,total,currency,terms,notes,created_by,import_key)
+        VALUES(?,'invoice',?,?,?,?,?,'sent',?,?,0,'none',0,0,?,'INR',?,?,?,?)`)
+        .run(nextNumber(ctx, 'invoices', s.invoice_prefix || 'INV', STRIKAR_DATE), strikar.cid, strikar.pid, 'Strikar Lifescience Website — 2nd tranche', STRIKAR_DATE, STRIKAR_DATE,
+          JSON.stringify([{ description: 'Strikar Lifescience Website — 2nd tranche', hsn: '', qty: 1, rate: 65000 }]), 65000, 65000, s.terms_invoice || null,
+          'Paid in full. The client deducted ₹13,000 TDS, which is tracked separately for the income-tax return.', founder.id, 'seed:invoice:strikar-2').lastInsertRowid);
+      db.prepare("INSERT INTO payments(invoice_id,client_id,project_id,account_id,date,amount,tds,method,category,notes,created_by,import_key) VALUES(?,?,?,?,?,65000,13000,'Bank Transfer','Product Sales',?,?,?)")
+        .run(id, strikar.cid, strikar.pid, accountId, STRIKAR_DATE, 'Strikar Lifescience Website — 2nd tranche. 10% TDS ₹13,000 deducted by the client.', founder.id, STRIKAR_PAYMENT_KEY);
+      refreshInvoice(ctx, id);
+      sec('income');
+      sec('invoices');
+    }
     linkPeople(ctx);
     if (opts.dryRun) throw new Dry();
   };
@@ -440,7 +457,7 @@ export function runSeed(ctx: AppContext, opts: SeedOptions): SeedReport {
   try { db.transaction(work)(); } catch (e) { if (!(e instanceof Dry)) throw e; }
 
   if (!opts.dryRun) {
-    report.checks = reconcile(ctx, crm, os, { 'Leads: India': -1, 'Leads: Foreign': 1 });
+    report.checks = reconcile(ctx, crm, os, { 'Leads: India': -1, 'Leads: Foreign': 1, 'Total revenue (income + grant received)': 65000, 'Current balance': 65000 });
     for (const t of ['leads', 'clients', 'projects', 'invoices', 'payments', 'expenses', 'grants', 'renewals', 'users']) report.counts[t] = (db.prepare(`SELECT COUNT(*) n FROM ${t}`).get() as { n: number }).n;
   }
   return report;
@@ -470,7 +487,7 @@ function reconcile(ctx: AppContext, crm: Record<string, Sheet>, os: Record<strin
     const rows = table(sheet, head);
     return round2(rows.reduce((s, r) => s + toMoney(r[norm(head)]), 0));
   };
-  check('Income tab total = payments in CRM (excluding grant receipts)', sum(os.Income, 'Amount'), round2(q("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE import_key NOT LIKE 'gs:grantin:%'").v));
+  check('Income tab total = payments in CRM (excluding grant receipts)', sum(os.Income, 'Amount'), round2(q(`SELECT COALESCE(SUM(amount),0) v FROM payments WHERE import_key NOT LIKE 'gs:grantin:%' AND import_key <> '${STRIKAR_PAYMENT_KEY}'`).v));
   check('Expenses tab total = expenses in CRM', sum(os.Expenses, 'Amount'), round2(expenses));
   check('Subscriptions in sheet = recurring items in CRM', table(os.Subscriptions, 'Software/Service').length + 1, q("SELECT COUNT(*) v FROM renewals WHERE kind IN ('subscription','bill')").v);
   check('Invoices created = client payments they cover', round2(q('SELECT COALESCE(SUM(amount),0) v FROM payments WHERE invoice_id IS NOT NULL').v), round2(q("SELECT COALESCE(SUM(total),0) v FROM invoices WHERE import_key LIKE 'seed:invoice:%'").v));

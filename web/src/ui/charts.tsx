@@ -147,7 +147,7 @@ export function Columns({ labels, series, h = 180, fmt = (n: number) => String(M
   const slot = (w - L) / labels.length;
   const bw = Math.min(16, (slot - 8) / series.length);
   return (
-    <div ref={ref} style={{ overflowX: 'auto' }}>
+    <div ref={ref} style={{ overflowX: 'auto' }} tabIndex={0} role="group" aria-label={`Chart: ${series.map((s) => s.name).join(', ')}`}>
       <svg className="chart" viewBox={`0 0 ${w} ${h}`} width={w} height={h} role="img" aria-label={series.map((s) => s.name).join(', ')}>
         {[0, 0.5, 1].map((p) => <g key={p}><line className="gl" x1={L} x2={w} y1={T + (h - T - B) * (1 - p)} y2={T + (h - T - B) * (1 - p)} /><text x={L - 6} y={T + (h - T - B) * (1 - p) + 4} textAnchor="end">{fmt(max * p)}</text></g>)}
         {labels.map((l, i) => (
@@ -158,7 +158,7 @@ export function Columns({ labels, series, h = 180, fmt = (n: number) => String(M
               const x = L + i * slot + (slot - bw * series.length) / 2 + si * bw;
               return <rect key={s.name} x={x} y={h - B - bh} width={bw - 2} height={bh} rx="2" fill={s.color}><title>{`${l} · ${s.name}: ${fmt(v)}`}</title></rect>;
             })}
-            <text x={L + i * slot + slot / 2} y={h - 8} textAnchor="middle">{l}</text>
+            {i % Math.max(1, Math.ceil(44 / slot)) === 0 && <text x={L + i * slot + slot / 2} y={h - 8} textAnchor="middle">{l}</text>}
           </g>
         ))}
       </svg>

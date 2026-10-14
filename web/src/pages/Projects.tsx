@@ -7,7 +7,7 @@ import { DataTable, type Column } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
 import { Badge, Due, LogoSq, Priority, Who } from '../ui/primitives';
-import { Amount, editCol, ExportBtn } from './common';
+import { Amount, editCol} from './common';
 
 export const pctDone = (p: Record<string, unknown>): number => (Number(p.task_count) ? Math.round((100 * Number(p.tasks_done)) / Number(p.task_count)) : 0);
 
@@ -32,6 +32,7 @@ export function ProjectsTable({ clientId }: { clientId?: number }) {
     ...(isFounder ? [
       { key: 'budget', label: 'Value', num: true, cls: 'opt', sort: 'budget', render: (r: Record<string, unknown>) => (Number(r.cr_value) ? <span title={`Agreed value plus change requests`}><Amount v={r.revised_value} /></span> : <Amount v={r.budget} dash />) } as Column,
       { key: 'total_received', label: 'Received', num: true, render: (r: Record<string, unknown>) => <Amount v={r.total_received} dash /> } as Column,
+      { key: 'to_get', label: 'Still to get', num: true, render: (r: Record<string, unknown>) => (['cancelled'].includes(String(r.status)) ? <span className="faint">—</span> : <Amount v={r.to_get} dash neg={Number(r.pending_amount) > 0} />) } as Column,
       { key: 'cr_open', label: 'Open CRs', num: true, cls: 'opt', render: (r: Record<string, unknown>) => (Number(r.cr_open) ? <span className="tag amber">{String(r.cr_open)}</span> : <span className="faint">—</span>) } as Column,
       editCol('projects', true),
     ] : []),
@@ -46,9 +47,8 @@ export function ProjectsTable({ clientId }: { clientId?: number }) {
 }
 
 export default function Projects() {
-  const { isFounder } = useSession();
   return (
-    <Page title="Projects" sub="Everything being built and looked after." actions={isFounder ? <ExportBtn resource="projects" /> : undefined}>
+    <Page title="Projects" sub="Everything being built and looked after.">
       <ProjectsTable />
     </Page>
   );

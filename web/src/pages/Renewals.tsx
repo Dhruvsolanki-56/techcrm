@@ -8,7 +8,7 @@ import { DataTable, type Column } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
 import { Badge, Due, Kpis, Who } from '../ui/primitives';
-import { Amount, Cell2, editCol, ExportBtn } from './common';
+import { Amount, Cell2, editCol} from './common';
 
 interface FinA { recurring: { monthly_cost: number; mrr: number; items: Row[] }; pending_estimates: Row[] }
 
@@ -22,9 +22,9 @@ export function RenewalsTable({ query, compact, defaults }: { query?: Record<str
     },
     { key: 'renewal_date', label: 'Next date', cls: 'nowrap', sort: 'renewal_date', render: (r) => <Due date={r.renewal_date} done={r.status !== 'active'} /> },
     { key: 'cycle', label: 'Cycle', cls: 'opt', render: (r) => labelOf(CYCLES, String(r.cycle)) },
-    { key: 'our_cost', label: 'Cost', num: true, sort: 'our_cost', render: (r) => <><Amount v={r.our_cost} dash />{Number(r.monthly_cost) && r.cycle !== 'monthly' ? <div className="t2">{money(r.monthly_cost)}/mo</div> : null}</> },
+    { key: 'our_cost', label: 'Cost', num: true, sort: 'our_cost', render: (r) => <><Amount v={r.our_cost} dash />{r.next_amount != null && r.next_amount !== '' ? <div className="t2 warn" title="Used once for the next debit, then the normal cost applies again">next: {money(r.next_amount)}</div> : Number(r.monthly_cost) && r.cycle !== 'monthly' ? <div className="t2">{money(r.monthly_cost)}/mo</div> : null}</> },
     { key: 'client_price', label: 'Client pays', num: true, cls: 'opt', render: (r) => <Amount v={r.client_price} dash /> },
-    { key: 'auto', label: 'Debit', cls: 'opt', render: (r) => (r.auto_debit ? <span className="tag green" title={`From ${r.pay_account_name ?? 'the main account'}`}>Automatic</span> : <span className="faint">Manual</span>) },
+    { key: 'auto', label: 'Paid by', cls: 'opt', render: (r) => (r.scope === 'personal' ? <span className="tag" title="Tracked only: nothing is deducted from company money">Person · not deducted</span> : r.auto_debit ? <span className="tag green" title={`From ${r.pay_account_name ?? 'the main account'}`}>Company · automatic</span> : <span className="faint">Company · manual</span>) },
     { key: 'owner_name', label: 'Owner', cls: 'opt', render: (r) => <Who name={r.owner_name} /> },
     { key: 'status', label: 'Status', render: (r) => <Badge value={r.status} /> },
     {
@@ -36,7 +36,7 @@ export function RenewalsTable({ query, compact, defaults }: { query?: Record<str
   ];
   return (
     <DataTable resource="renewals" query={query} columns={cols} compact={compact} noRef={compact} defaultSort="renewal_date:asc" searchPlaceholder="Search subscriptions, domains, plans…" noun="item"
-      filters={compact ? [] : [{ key: 'kind', label: 'All kinds', options: RENEWAL_KINDS }, { key: 'status', label: 'Any status', options: RENEWAL_STATUSES }, { key: 'auto_debit', label: 'Any debit', options: [['1', 'Automatic'], ['0', 'Manual']] }]}
+      filters={compact ? [] : [{ key: 'kind', label: 'All kinds', options: RENEWAL_KINDS }, { key: 'scope', label: 'Company or person', options: [['company', 'Company'], ['personal', 'Person']] }, { key: 'status', label: 'Any status', options: RENEWAL_STATUSES }, { key: 'auto_debit', label: 'Any debit', options: [['1', 'Automatic'], ['0', 'Manual']] }]}
       toolbar={<button type="button" className="btn primary" onClick={() => editor.open({ resource: 'renewals', defaults })}><Icon name="plus" />New item</button>}
       empty={{ title: 'Nothing recurring yet', text: 'Add maintenance plans, domains, hosting, subscriptions and bills.' }} />
   );
@@ -51,8 +51,7 @@ export default function Renewals() {
   const est = fin.data?.pending_estimates ?? [];
   void isFounder;
   return (
-    <Page title="Subscriptions & renewals" sub="Plans you sell, and what you pay for. Items set to debit automatically record their own expense on the date."
-      actions={<ExportBtn resource="renewals" />}>
+    <Page title="Subscriptions & renewals" sub="Plans you sell, and what you pay for. Items set to debit automatically record their own expense on the date.">
       <Kpis items={[
         { label: 'Maintenance income / month', value: money(rec?.mrr ?? 0), tone: 'good', sub: 'From active maintenance plans' },
         { label: 'Running cost / month', value: money(rec?.monthly_cost ?? 0), sub: 'Subscriptions, domains, hosting, bills' },

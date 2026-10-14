@@ -1,3 +1,5 @@
+import { today as localToday } from '@crm/shared';
+import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ago, type LoggedIn } from './helpers';
 import { createDemo, type Demo } from './demo';
@@ -9,7 +11,7 @@ beforeAll(async () => {
   F = d.F;
 });
 afterAll(() => d.app.close());
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 
 describe('every record type: create, edit, list, delete — each with its own system ID', () => {
   // resource, create body, edit body, field that must change, ID pattern
@@ -106,11 +108,33 @@ describe('pagination, search, sorting and filters are done by the server', () =>
     expect(recent.length).toBeLessThan(all.length);
     expect(recent.every((p) => p.date >= ago(20))).toBe(true);
   });
-  it('exports everything (not just one page) as CSV', async () => {
+  it('exports everything (not just one page) as Excel and as PDF — and never as CSV', async () => {
     const cookie = await cookieOf(d);
-    const r = await d.app.request.get('/api/leads/export.csv').set('X-Requested-With', 'crm').set('Cookie', cookie);
-    expect(r.status).toBe(200);
-    expect(r.text.split('\r\n').length).toBeGreaterThan(18); // header + every lead (more than one page of 5 above)
+    const get = (url: string) => d.app.request.get(url).set('X-Requested-With', 'crm').set('Cookie', cookie).buffer(true).parse((res, cb) => { const c: Buffer[] = []; res.on('data', (x: Buffer) => c.push(x)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    const x = await get('/api/leads/export.xlsx');
+    expect(x.status).toBe(200);
+    expect(x.headers['content-type']).toContain('spreadsheetml');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(x.body as never);
+    const ws = wb.worksheets[0] as ExcelJS.Worksheet;
+    expect(ws.rowCount).toBeGreaterThan(18); // header + every lead (more than one page of 5 above)
+    expect(String(ws.getRow(1).getCell(1).value)).toBe('Ref');
+    const px = await get('/api/payments/export.xlsx');
+    const pwb = new ExcelJS.Workbook();
+    await pwb.xlsx.load(px.body as never);
+    const heads = ((pwb.worksheets[0] as ExcelJS.Worksheet).getRow(1).values as unknown[]).slice(1).map(String);
+    expect(heads).toContain('TDS'); // acronyms read properly
+    expect(heads).not.toContain('Import key'); // nothing internal leaks into a spreadsheet people share
+    expect(heads.filter((h) => /(^|\s)id$/i.test(h))).toEqual([]);
+    const filtered = await get('/api/leads/export.xlsx?stage=won');
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(filtered.body as never);
+    expect((wb2.worksheets[0] as ExcelJS.Worksheet).rowCount).toBeLessThan(ws.rowCount);
+    const pdf = await get('/api/leads/export.pdf');
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    expect((await get('/api/leads/export.csv')).status).toBe(404);
   });
 });
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, qs, type Row } from '../lib/api';
 import { useGet, useAct } from '../lib/hooks';
+import { LoadFailed } from '../ui/primitives';
 import { useSession } from '../lib/session';
 import { ago } from '../shell/Bell';
 import { Icon } from '../ui/Icon';
@@ -20,6 +21,7 @@ export function Notes({ type, id, canWrite = true, kinds = true, placeholder }: 
   const del = useAct((nid: number) => api.del(`/notes/${nid}`));
   return (
     <div>
+      <LoadFailed q={notes} />
       {canWrite && (
         <div className="composer">
           <textarea rows={2} value={body} placeholder={placeholder ?? 'Write a note, call summary, decision or WhatsApp gist…'} aria-label="New note"

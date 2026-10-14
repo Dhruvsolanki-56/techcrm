@@ -1,3 +1,4 @@
+import { today as localToday } from '@crm/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -44,7 +45,7 @@ describe('backups and background jobs', () => {
     await dailyBackup(ctx); // the second call the same day does nothing
     const files = fs.readdirSync(ctx.config.backupDir).filter((f) => f.startsWith('auto-')).sort();
     expect(files).toHaveLength(2);
-    expect(files[1]).toBe(`auto-${new Date().toISOString().slice(0, 10)}.db`);
+    expect(files[1]).toBe(`auto-${localToday()}.db`);
   });
   it('start and stop cleanly', async () => {
     const stop = startJobs(d.app.ctx);

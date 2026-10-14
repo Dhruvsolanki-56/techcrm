@@ -1,4 +1,4 @@
-import { CR_KINDS, CR_PHASES, CR_STATUSES, CR_TRANSITIONS, labelOf } from '@crm/shared';
+import { CR_KINDS, CR_PHASES, CR_STATUSES, labelOf } from '@crm/shared';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useEditor } from '../forms/RecordEditor';
@@ -12,6 +12,8 @@ import { Icon } from '../ui/Icon';
 import { Kanban } from '../ui/Kanban';
 import { Modal } from '../ui/Modal';
 import { Badge, RefChip } from '../ui/primitives';
+import { DocsPanel } from './Docs';
+import { HistoryPanel } from './HistoryPanel';
 import { Notes } from './Notes';
 import { Prop } from './record';
 
@@ -38,7 +40,8 @@ export function CRModal({ id, onClose }: { id: number; onClose(): void }) {
   const toInvoice = useAct(() => api.post<{ invoice_id: number }>(`/quotes/${cr?.quote_id}/to-invoice`), 'Invoice created', (r) => { onClose(); nav(`/invoices/${r.invoice_id}`); });
 
   if (!cr) return <Modal title="Change request" size="xl" onClose={onClose}><div className="empty">{q.isError ? (q.error as Error).message : 'Loading…'}</div></Modal>;
-  const next = (CR_TRANSITIONS[String(cr.status)] ?? []).filter((s) => isFounder || ['in_progress', 'delivered'].includes(s));
+  // any status can be set at any time: real work does not follow a fixed script
+  const next = CR_STATUSES.map(([v]) => v as string).filter((s) => s !== cr.status && (isFounder || ['in_progress', 'delivered'].includes(s)));
   const quoteOpen = cr.quote_id && ['draft', 'sent', 'accepted'].includes(String(cr.quote_status));
   return (
     <Modal title={String(cr.title)} sub={`${crRef(cr.id)} · ${String(cr.project_name)} · ${String(cr.client_name ?? '')}`} size="xl" onClose={onClose}
@@ -64,7 +67,9 @@ export function CRModal({ id, onClose }: { id: number; onClose(): void }) {
           <div className="pop-sec"><div className="sec-h"><h3>Tasks</h3></div>
             {tasks.data?.length ? <div className="list panel">{tasks.data.map((t) => <div className="li" key={t.id}><div className="grow"><div className="t">{String(t.title)}</div><div className="s">T-{String(t.id)} · {String(t.assignee_name ?? 'Unassigned')}</div></div><Badge value={t.status} /></div>)}</div> : <div className="faint small">No tasks yet. Add tasks for the work this change request needs.</div>}
           </div>
-          <div className="pop-sec"><div className="sec-h"><h3>History</h3></div><Notes type="change_request" id={id} kinds={false} placeholder="Client feedback, scope decisions, approvals…" /></div>
+          <div className="pop-sec"><div className="sec-h"><h3>Files</h3></div><DocsPanel entityType="change_request" entityId={id} /></div>
+          <div className="pop-sec"><div className="sec-h"><h3>Discussion</h3></div><Notes type="change_request" id={id} kinds={false} placeholder="Client feedback, scope decisions, approvals…" /></div>
+          <div className="pop-sec"><div className="sec-h"><h3>Changes</h3></div><HistoryPanel resource="change_requests" id={id} /></div>
         </div>
         <aside className="pop-side">
           <Prop label="Status"><Badge value={cr.status} /></Prop>
@@ -121,10 +126,13 @@ export function CRBoard({ projectId }: { projectId?: number }) {
   const q = useGet<Row[]>('/change_requests', { project_id: projectId, limit: 500 });
   const [view, setView] = useState<number | null>(null);
   const move = useAct(({ id, status }: { id: number; status: string }) => api.put(`/change_requests/${id}`, { status }), 'Status updated');
+  const [closed, setClosed] = useState(false);
   const items = q.data ?? [];
+  const shut = items.filter((i) => ['rejected', 'cancelled'].includes(String(i.status))).length;
   return (
     <>
-      <Kanban cols={CR_STATUSES.map(([v, l]) => ({ v, l, c: STATUS_TONE[v] }))} items={items} group={(i) => String(i.status)}
+      <label className="check" style={{ marginBottom: 10 }}><input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /><span>Show rejected &amp; cancelled{shut ? ` (${shut})` : ''}</span></label>
+      <Kanban colMin={closed ? 220 : 200} cols={CR_STATUSES.filter(([v]) => closed || !['rejected', 'cancelled'].includes(v)).map(([v, l]) => ({ v, l, c: STATUS_TONE[v] }))} items={closed ? items : items.filter((i) => !['rejected', 'cancelled'].includes(String(i.status)))} group={(i) => String(i.status)}
         onOpen={(i) => setView(i.id)} onMove={(i, status) => move.mutate({ id: i.id, status })}
         head={(list) => { const sum = list.reduce((s, i) => s + Number(i.estimate_amount || 0), 0); return sum ? money(sum) : ''; }}
         card={(i) => (

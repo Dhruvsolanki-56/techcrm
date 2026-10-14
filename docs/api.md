@@ -19,11 +19,13 @@ A person with a temporary password can only reach `/me`, `/password` and `/looku
 
 ## Records (one set of endpoints per resource)
 
-Resources: `leads`, `clients`, `contacts`, `projects`, `tasks`, `change_requests`, `maintenance_logs`, `events`, `documents`, `quotes`, `invoices`, `payments`, `expenses`, `accounts`, `transfers`, `grants`, `assets`, `bank_transactions`, `renewals`.
+Resources: `milestones` (payment schedule of a project), `leads`, `clients`, `contacts`, `projects`, `tasks`, `change_requests`, `maintenance_logs`, `events`, `documents`, `quotes`, `invoices`, `payments`, `expenses`, `accounts`, `transfers`, `grants`, `assets`, `bank_transactions`, `renewals`.
 
 ```
 GET    /:resource                 page of rows (see below)
-GET    /:resource/export.csv      same filters, every row (founders)
+GET    /:resource/export.xlsx     Excel of exactly what the list shows (same filters, search, order; founders)
+GET    /:resource/export.pdf      the same as a PDF (main columns)
+GET    /history?entity=&entity_id=  every change to one record: who, when, field, from → to
 GET    /:resource/:id
 POST   /:resource                 create → 201 + the row
 PUT    /:resource/:id             update (send only what changed) → the row
@@ -51,6 +53,9 @@ Ids in the path must be plain integers; `/projects/1%20OR%201=1` is a 404, not p
 - Joined names are included (`client_name`, `project_name`, `owner_name`, `assignees`…).
 - Founder-only money columns (`budget`, `cr_value`, `total_billed`, `estimate_amount`, quote / invoice totals on change requests…) are absent for interns.
 - `projects` also return `cr_count`, `cr_open`, `cr_value` (approved change-request money), `revised_value` (= `budget + cr_value`), `total_billed`, `total_received`, `total_expenses`.
+- `invoices` return `balance` (never negative) and `credit` (what was paid above the total). An overpaid invoice is settled, shows up in the Action center, and never turns "pending" negative in any analytic.
+- Money fields are kept to whole paise (`10.005` is saved as `10.01`). A payment or link to a record that does not exist is a `409` that says so.
+- **TDS is never part of an invoice.** An invoice is for what the client really pays us; the TDS they deduct sits on the payment (`tds`), is not counted as paid on the invoice, as cash, or as profit, and is tracked for the ITR. `payments` carry `tds` (a tax credit), `tds_status` (`deducted → certificate → claimed`), `tds_section` and `tds_claimed_on` (filled when claimed).
 - `change_requests` also return `billing_status` (`not_quoted | quoted | invoiced | paid | not_billable`), `quote_number`, `invoice_number` and their amounts.
 
 ## Business flows
@@ -61,9 +66,13 @@ Ids in the path must be plain integers; `/projects/1%20OR%201=1` is a 404, not p
 | `POST /leads/:id/convert` | lead → client (+ main contact, notes and files moved); `create_project`, `project_name`, `quote_id` optional — an accepted quotation sets the project's value |
 | `POST /change-requests/:id/quote` | creates a quotation from the request's estimate (one open quote per request) |
 | `POST /quotes/:id/to-invoice` | draft invoice carrying the client, project and change request; the quote becomes accepted |
+| `POST /projects/:id/schedule` | split the agreed value with a ready-made payment schedule (`template`: `full`, `50-50`, `40-30-30`, `30-30-40`); refused once any payment is invoiced |
+| `POST /milestones/:id/invoice` | draft invoice for one payment of the schedule; the payment then follows the invoice (`ready → invoiced → overdue / paid`) |
+| `POST /quotes/:id/start-project` | accepted quotation of an existing client → new project (value = quotation) |
 | `POST /renewals/:id/renew` | roll a manual renewal's date forward one cycle |
 | `POST /bank-match` | match unmatched statement lines to income / expenses (same amount, within 5 days) |
-| `GET /contact-log` | every logged contact, newest first, paged (`kind`, `user_id`, `lead_id`, `from`, `to`, `q`) |
+| `GET /analytics/tds`, `/analytics/tds/export.xlsx|pdf` | TDS by financial year (Apr–Mar, with the assessment year), client and payment; filters `fy`, `status`, `client_id`; totals deducted / certificate / claimed / still to claim |
+| `GET /contact-log`, `/contact-log/export.xlsx|pdf` | every logged contact, newest first, paged (`kind`, `user_id`, `lead_id`, `from`, `to`, `q`) |
 
 Change-request status moves only along `requested → estimated → quoted → approved → in_progress → delivered` (plus `rejected` / `cancelled`, and back to `requested`). Accepting its quotation approves it; rejecting or expiring the quotation returns it to `estimated`.
 
@@ -93,8 +102,14 @@ Change-request status moves only along `requested → estimated → quoted → a
 | Call | |
 |---|---|
 | `GET /lookups` | small lists for dropdowns, already limited to what the person may see |
+| `GET /attention` | the Action center: everything to act on, grouped by area (Money, Sales, Delivery, Support, Admin) and ranked `critical / high / normal`; interns get only their own work |
 | `GET /dashboard` | everything on Home |
 | `GET /analytics/sales?year=` | funnel, by market / side / department / category / source / owner, monthly, sales cycle |
+| `GET /analytics/spending?by=&from=&to=&category=&vendor=&project_id=&grant=` | where money went: group by category, vendor, project, client, grant, account, who paid, recurring item, mode or month, with filters and the biggest expenses |
+| `GET /analytics/income?by=` | where money came from (client, project, category, account, mode, grant, month), with TDS deducted |
+| `GET /analytics/receivables` | per client and project: agreed, invoiced, received (cash only), TDS (tracked apart), pending, overdue, not yet invoiced (= value − TDS − invoiced); ageing |
+| `GET /analytics/grants[/:id]` | how each grant was used: category, vendor, project, month, remaining, missing receipts |
+| `GET /analytics/subscriptions` | running cost by company / person / kind / owner, next 30 days, price history |
 | `GET /analytics/delivery` | projects, change requests (+ money for founders), tasks per week, support, team load |
 | `GET /analytics/finance?months=` | monthly income / expense / invoiced / margin, top clients, ageing, project profit, grants, recurring cost, 60-day forecast |
 | `GET /finance/summary?from=&to=` | the Finance overview for a period |

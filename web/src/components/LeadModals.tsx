@@ -58,7 +58,7 @@ export function ConvertModal({ lead, onClose }: { lead: Row; onClose(): void }) 
   return (
     <Modal title="Convert to client" sub={String(lead.company || lead.name)} size="sm" onClose={onClose}
       footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className={`btn accent ${go.isPending ? 'busy' : ''}`} onClick={() => { setErr(''); go.mutate(undefined, { onError: (e) => setErr(e.message) }); }}>Convert</button></>}>
-      <p className="muted" style={{ marginTop: 0 }}>This creates the client and a main contact, moves the notes and files across and marks the lead as Converted.</p>
+      <p className="muted" style={{ marginTop: 0 }}>{lead.client_id ? `This lead is for an existing client (${String(lead.client_name ?? '')}), so no new client is created: it is marked Converted and the work starts under that client.` : 'This creates the client and a main contact, moves the notes and files across and marks the lead as Converted.'}</p>
       <div className="form-grid">
         <label className="check full"><input type="checkbox" checked={createProject} onChange={(e) => setCreateProject(e.target.checked)} /><span>Also create the project</span></label>
         {createProject && (

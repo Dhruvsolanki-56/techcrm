@@ -7,7 +7,7 @@ import { useSession } from '../lib/session';
 import { Icon } from '../ui/Icon';
 import { Modal, useDialogs } from '../ui/Modal';
 import { Page } from '../ui/Page';
-import { Avatar, Badge } from '../ui/primitives';
+import { Avatar, Badge, LoadFailed } from '../ui/primitives';
 
 const FLAG_LABEL: Record<string, [string, string]> = {
   leads: ['Sales leads', 'Pipeline, follow-ups, contact log and sales reports'],
@@ -72,6 +72,7 @@ export default function Team() {
   return (
     <Page title="Team & access" sub="Founders see everything. Interns see their own work, plus anything you switch on for them."
       actions={<button type="button" className="btn primary" onClick={() => setEditing('new')}><Icon name="plus" />Add person</button>}>
+      <LoadFailed q={q} />
       <div className="tbl">
         <div className="tbl-scroll" tabIndex={0}>
           <table className="t">

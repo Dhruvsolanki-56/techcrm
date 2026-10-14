@@ -11,7 +11,7 @@ import { intOrNull, str } from '../http/validate';
 import { isFounder, type User } from '../security/permissions';
 
 const NOTE_ENTITIES: Record<string, string> = {
-  lead: 'leads', client: 'clients', project: 'projects', task: 'tasks', invoice: 'invoices', quote: 'quotes', maintenance: 'maintenance_logs', change_request: 'change_requests',
+  lead: 'leads', client: 'clients', project: 'projects', task: 'tasks', invoice: 'invoices', quote: 'quotes', maintenance: 'maintenance_logs', change_request: 'change_requests', grant: 'grants', renewal: 'renewals', expense: 'expenses', payment: 'payments', milestone: 'milestones', asset: 'assets',
 };
 const NOTE_KINDS = ['note', 'call', 'meeting', 'email', 'whatsapp', 'visit', 'demo', 'proposal'];
 const NOTE_SELECT = 'SELECT n.*, u.name AS user_name FROM notes n LEFT JOIN users u ON u.id=n.user_id';

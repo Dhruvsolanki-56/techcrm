@@ -1,3 +1,4 @@
+import { addDays, today as localToday } from '@crm/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -8,7 +9,7 @@ import { createTestApp, type LoggedIn, type TestApp } from './helpers';
 
 const xlsDir = path.join(ROOT, 'current_xls');
 const have = fs.existsSync(path.join(xlsDir, 'TechSentinals OS.xlsx')) && fs.existsSync(path.join(xlsDir, 'TechSentinals CRM.xlsx'));
-const t = new Date().toISOString().slice(0, 10);
+const t = localToday();
 const PW = 'Seed-Test-2026';
 
 /** The real workbooks → the real API. Every number is compared with what the sheets show themselves. */
@@ -29,15 +30,15 @@ describe.skipIf(!have)('TechSentinals seed', () => {
     const bad = report.checks.filter((c) => !c.ok);
     expect(bad, JSON.stringify(bad)).toEqual([]);
     expect(report.checks.length).toBeGreaterThanOrEqual(50);
-    expect(report.counts).toMatchObject({ leads: 121, clients: 4, projects: 5, invoices: 5, payments: 15, expenses: 50, grants: 1, renewals: 5, users: 4 });
+    expect(report.counts).toMatchObject({ leads: 121, clients: 4, projects: 5, invoices: 6, payments: 16, expenses: 50, grants: 1, renewals: 5, users: 4 });
   });
   describe('money', () => {
     it('matches the sheet dashboard: revenue, expenses, balance, grants', async () => {
       const f = await get(`/finance/summary?from=2024-01-01&to=${t}`);
-      expect(f.income.cash).toBe(509400);
+      expect(f.income.cash).toBe(509400 + 65000); // + Strikar's 2nd tranche
       expect(f.expenses.v).toBeCloseTo(166713.34, 2);
-      expect(f.profit).toBeCloseTo(342686.66, 2);
-      expect(f.cash).toBeCloseTo(342686.66, 2);
+      expect(f.profit).toBeCloseTo(342686.66 + 65000, 2); // the ₹13,000 TDS is a tax credit, not income in hand
+      expect(f.cash).toBeCloseTo(342686.66 + 65000, 2);
       expect(f.grants).toMatchObject({ requested: 250000, received: 100000 });
     });
     it('files expenses by what they were for (the sheet’s “Grant” became a funded-by link)', async () => {
@@ -60,11 +61,11 @@ describe.skipIf(!have)('TechSentinals seed', () => {
     it('attributes income to the right clients and projects (own-company money is not client income)', async () => {
       const f = await get(`/finance/summary?from=2024-01-01&to=${t}`);
       const cl = Object.fromEntries(f.income_by_client.map((x: { k: string; v: number }) => [x.k, x.v]));
-      expect(cl).toMatchObject({ 'RotoTech Systems': 175000, 'Vishalwin Foundation': 102900, 'Inventa Systems': 45000, 'Strikar Lifescience LLP': 39000, Unassigned: 147500 });
+      expect(cl).toMatchObject({ 'RotoTech Systems': 175000, 'Vishalwin Foundation': 102900, 'Inventa Systems': 45000, 'Strikar Lifescience LLP': 104000, Unassigned: 147500 });
       const pr = Object.fromEntries(f.projects.map((x: { name: string; received: number }) => [x.name, x.received]));
       expect(pr).toMatchObject({
         'Inventa Website': 45000, 'RotoTech Custom Software Development': 150000, 'RotoTech Maintenance & Support (Phase 2)': 25000,
-        'Strikar Lifescience Website': 39000, 'Vishalwin Foundation NGO Dashboard': 102900,
+        'Strikar Lifescience Website': 104000, 'Vishalwin Foundation NGO Dashboard': 102900,
       });
     });
     it('puts dates back in order (nothing in the future) and the grant receipt on the first grant spend', async () => {
@@ -108,12 +109,27 @@ describe.skipIf(!have)('TechSentinals seed', () => {
     });
     it('has one paid, numbered invoice per project with its payments attached', async () => {
       const inv = await get('/invoices?limit=500');
-      expect(inv).toHaveLength(5);
+      expect(inv).toHaveLength(6);
       expect(inv.every((i: { status: string; balance: number }) => i.status === 'paid' && i.balance === 0)).toBe(true);
-      expect(inv.map((i: { number: string }) => i.number).sort()).toEqual(['INV/2025-26/0001', 'INV/2026-27/0001', 'INV/2026-27/0002', 'INV/2026-27/0003', 'INV/2026-27/0004']);
-      expect(inv.reduce((s: number, i: { total: number }) => s + i.total, 0)).toBe(45000 + 150000 + 25000 + 39000 + 102900);
+      expect(inv.map((i: { number: string }) => i.number).sort()).toEqual(['INV/2025-26/0001', 'INV/2026-27/0001', 'INV/2026-27/0002', 'INV/2026-27/0003', 'INV/2026-27/0004', 'INV/2026-27/0005']);
+      expect(inv.reduce((s: number, i: { total: number }) => s + i.total, 0)).toBe(45000 + 150000 + 25000 + 39000 + 102900 + 65000);
       const pays = await get('/payments?limit=500');
       expect(pays.filter((p: { client_id: number }) => p.client_id).every((p: { invoice_id: number }) => p.invoice_id)).toBe(true);
+    });
+    it('has the real Strikar and Vishalwin money: ₹1.30L and ₹3.5L projects, Strikar invoiced and received ₹1,04,000 in cash, ₹13,000 TDS tracked apart, ₹13,000 still to bill', async () => {
+      const pj = Object.fromEntries((await get('/projects?limit=50')).map((p: { name: string }) => [p.name, p]));
+      expect(pj['Strikar Lifescience Website']).toMatchObject({ budget: 130000 });
+      expect(pj['Vishalwin Foundation NGO Dashboard']).toMatchObject({ budget: 350000 });
+      const pays = (await get('/payments?limit=500')) as { client_name: string; amount: number; tds: number }[];
+      const strikar = pays.filter((p) => p.client_name === 'Strikar Lifescience LLP');
+      expect(strikar.reduce((a, p) => a + p.amount, 0)).toBe(104000);
+      expect(strikar.reduce((a, p) => a + p.tds, 0)).toBe(13000);
+      expect(pays.filter((p) => p.client_name === 'Vishalwin Foundation').reduce((a, p) => a + p.amount, 0)).toBe(102900);
+      const inv = (await get('/invoices?limit=500')) as { client_name: string; total: number; balance: number }[];
+      expect(inv.filter((i) => i.client_name === 'Strikar Lifescience LLP').reduce((a, i) => a + i.total, 0)).toBe(104000); // TDS is never part of an invoice
+      const rec = (await get('/analytics/receivables')) as { projects: { name: string; value: number; invoiced: number; received: number; tds: number; pending: number; unbilled: number }[] };
+      expect(rec.projects.find((p) => p.name === 'Strikar Lifescience Website')).toMatchObject({ value: 130000, invoiced: 104000, received: 104000, tds: 13000, pending: 0, unbilled: 13000 });
+      expect(inv.every((i) => i.balance === 0)).toBe(true);
     });
     it('plans RotoTech maintenance until December and gives Inventa none', async () => {
       const ren = await get('/renewals?limit=500');
@@ -139,7 +155,7 @@ describe.skipIf(!have)('TechSentinals seed', () => {
       expect(runAutoDebits(ctx, claude.renewal_date)).toHaveLength(0);
       const ex = ctx.db.prepare('SELECT * FROM expenses WHERE renewal_id=?').get(claude.id) as Record<string, unknown>;
       expect(ex).toMatchObject({ amount: 2399, category: 'Software/SaaS', status: 'paid', vendor: 'Anthropic', account_id: claude.pay_account_id });
-      const airtelLater = new Date(Date.now() + 40 * 864e5).toISOString().slice(0, 10);
+      const airtelLater = addDays(localToday(), 40);
       const est = runAutoDebits(ctx, airtelLater).filter((x) => /Airtel/.test(x.renewal));
       expect(est.length).toBeGreaterThanOrEqual(1);
       expect(est[0]).toMatchObject({ estimate: true, amount: 834 });
@@ -217,7 +233,7 @@ describe.skipIf(!have)('seed re-runs', () => {
     const reset = runSeed(app.ctx, { xlsDir, password: PW, reset: true });
     expect(reset.removed?.leads).toBe(121);
     expect(reset.counts.leads).toBe(122); // the hand-typed lead survived
-    expect(reset.counts.invoices).toBe(5);
+    expect(reset.counts.invoices).toBe(6);
     expect(reset.checks.filter((c) => !['Leads: total', 'Leads: open', 'Leads added in 2026-10'].includes(c.what) && !c.ok)).toEqual([]);
     app.close();
   });

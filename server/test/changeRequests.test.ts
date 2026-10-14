@@ -1,10 +1,11 @@
+import { today as localToday } from '@crm/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDemo, type Demo } from './demo';
 
 let d: Demo;
 beforeAll(async () => { d = await createDemo(); });
 afterAll(() => d.app.close());
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 
 /** The whole commercial chain, end to end: lead → quotation → client & project → change request → quotation → invoice → payment. */
 describe('lead → quotation → client & project', () => {
@@ -45,10 +46,11 @@ describe('lead → quotation → client & project', () => {
       const timeline = (await d.F.get(`/notes?entity_type=change_request&entity_id=${crId}`)).j as { body: string }[];
       expect(timeline.some((n) => /Change request raised \(before delivery\)/.test(n.body))).toBe(true);
     });
-    it('cannot be marked estimated without an estimate, and cannot skip steps', async () => {
-      expect((await d.F.put(`/change_requests/${crId}`, { status: 'estimated' })).s).toBe(400);
-      expect((await d.F.put(`/change_requests/${crId}`, { status: 'delivered' })).s).toBe(400);
-      expect((await d.F.put(`/change_requests/${crId}`, { project_id: d.proj.acme })).s).toBe(400);
+    it('is never locked: any status can be set at any time, and the history records every change', async () => {
+      for (const status of ['estimated', 'delivered', 'requested']) expect((await d.F.put(`/change_requests/${crId}`, { status })).s).toBe(200);
+      const hist = (await d.F.get(`/history?entity=change_requests&entity_id=${crId}`)).j as { action: string; changes: { field: string; from: string; to: string }[] }[];
+      expect(hist.filter((h) => h.action === 'update').length).toBeGreaterThanOrEqual(3);
+      expect(hist.some((h) => h.changes.some((c) => c.field === 'status' && c.from === 'estimated' && c.to === 'delivered'))).toBe(true);
     });
     it('is estimated, then quoted with one click: quotation and request point at each other', async () => {
       const est = await d.F.put(`/change_requests/${crId}`, { estimate_hours: 12, estimate_amount: 24000, status: 'estimated' });
@@ -86,8 +88,7 @@ describe('lead → quotation → client & project', () => {
       expect((await d.F.get(`/change_requests/${crId}`)).j.billing_status).toBe('paid');
       expect((await d.F.get(`/projects/${projectId}`)).j.total_received).toBe(28320);
     });
-    it('cannot be deleted once invoiced, and links tasks to its own project only', async () => {
-      expect((await d.F.del(`/change_requests/${crId}`)).s).toBe(409);
+    it('links tasks to its own project only', async () => {
       const t = await d.F.post('/tasks', { title: 'Build the wishlist page', change_request_id: crId });
       expect(t.s).toBe(201);
       expect(t.j.project_id).toBe(projectId);

@@ -37,7 +37,7 @@ export function Modal({ title, sub, size = '', dirty, onClose, children, footer,
     document.body.classList.add('modal-open');
     const prev = document.activeElement as HTMLElement | null;
     const first = box.current?.querySelector<HTMLElement>('.modal-b input:not([type=hidden]):not([type=checkbox]):not([type=file]):not(:disabled), .modal-b textarea, .modal-b select');
-    if (first && window.matchMedia?.('(pointer: fine)').matches) setTimeout(() => first.focus({ preventScroll: true }), 40);
+    if (first && window.matchMedia?.('(pointer: fine)').matches) setTimeout(() => { if (!box.current?.contains(document.activeElement) || document.activeElement === box.current) first.focus({ preventScroll: true }); }, 40); // never steal focus from a field the person already went to
     return () => {
       stack.splice(stack.indexOf(me), 1);
       if (!stack.length) document.body.classList.remove('modal-open');

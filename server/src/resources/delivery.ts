@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  CR_KINDS, CR_PHASES, CR_STATUSES, CR_TRANSITIONS, DELIVERED_PROJECT_STATUSES, MAINT_STATUSES, PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, today, values,
+  CR_KINDS, CR_PHASES, CR_STATUSES, DELIVERED_PROJECT_STATUSES, MAINT_STATUSES, PRIORITIES, PROJECT_STATUSES, TASK_STATUSES, today, values,
 } from '@crm/shared';
 import { defineResource, inList } from '../crud/define';
 import { refSql } from '../crud/refs';
@@ -11,10 +11,11 @@ import { forbidden, HttpError } from '../shared/errors';
 import { hasFlag, isFounder } from '../security/permissions';
 import { projectScope, visibleProjectIds } from '../domain/access';
 import { projectCode, purgeEntity } from '../domain/entities';
+import { CR_VALUE_SQL, PM_COLUMNS } from '../domain/projectMoney';
 import { STATUS_LABEL, taskKey } from '../domain/tasks';
 import type { ResourceDeps } from './deps';
 
-const PROJECT_CR_VALUE = "SELECT COALESCE(SUM(cr.estimate_amount),0) FROM change_requests cr WHERE cr.project_id=p.id AND cr.billable=1 AND cr.status IN ('approved','in_progress','delivered')";
+const PROJECT_CR_VALUE = CR_VALUE_SQL;
 
 export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDef> {
   const { ctx, getEngine, tasks } = deps;
@@ -42,9 +43,10 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
       (SELECT COALESCE(SUM(i.total),0) FROM invoices i WHERE i.project_id=p.id AND i.kind='invoice' AND i.status NOT IN ('draft','cancelled'))
         + (SELECT COALESCE(SUM(x.amount),0) FROM payments x WHERE x.project_id=p.id AND x.invoice_id IS NULL) AS total_billed,
       (SELECT COALESCE(SUM(x.amount),0) FROM payments x WHERE x.project_id=p.id) AS total_received,
-      (SELECT COALESCE(SUM(e.amount),0) FROM expenses e WHERE e.project_id=p.id AND e.status='paid') AS total_expenses`,
+      (SELECT COALESCE(SUM(e.amount),0) FROM expenses e WHERE e.project_id=p.id AND e.status='paid') AS total_expenses,
+      ${PM_COLUMNS}`,
     from: 'FROM projects p LEFT JOIN clients c ON c.id=p.client_id LEFT JOIN users u ON u.id=p.manager_id',
-    founderCols: ['budget', 'total_billed', 'total_received', 'total_expenses', 'cr_value', 'revised_value'],
+    founderCols: ['budget', 'total_billed', 'total_received', 'total_expenses', 'cr_value', 'revised_value', 'tds_total', 'to_invoice', 'pending_amount', 'to_get'],
     search: ['p.name', 'p.code', 'p.type', 'p.tech_stack', 'p.description', 'p.live_url', 'c.company', 'u.name'],
     filters: { client_id: 'p.client_id', status: 'p.status', manager_id: 'p.manager_id', type: 'p.type' },
     sortable: { name: 'p.name COLLATE NOCASE', status: 'p.status', deadline: "COALESCE(p.deadline,'9999')", created_at: 'p.created_at', client_name: 'c.company COLLATE NOCASE', budget: 'p.budget', id: 'p.id' },
@@ -202,7 +204,6 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
         const visible = visibleProjectIds(ctx, user);
         if (visible !== null && !visible.includes(project.id)) throw forbidden();
       }
-      if (op === 'update' && ex && d.project_id && d.project_id !== ex.project_id) throw new HttpError(400, 'A change request cannot be moved to another project.');
       if (!isFounder(user)) {
         // delivery people record and progress requests; money and approvals belong to founders
         for (const k of ['estimate_amount', 'billable', 'approved_on']) delete d[k];
@@ -218,16 +219,11 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
         d.status ||= 'requested';
       }
       if (d.status && ex && d.status !== ex.status) {
-        if (!CR_TRANSITIONS[ex.status]?.includes(d.status)) throw new HttpError(400, `A change request that is ${ex.status.replace(/_/g, ' ')} cannot go straight to ${d.status.replace(/_/g, ' ')}.`);
         if (d.status === 'approved' && !ex.approved_on && !d.approved_on) d.approved_on = today();
         if (d.status === 'delivered' && !d.delivered_on) d.delivered_on = today();
         if (d.status !== 'delivered' && ex.delivered_on && !('delivered_on' in d)) d.delivered_on = null;
-        if (d.status === 'estimated' && !(Number(d.estimate_amount ?? ex.estimate_amount) > 0 || Number(d.estimate_hours ?? ex.estimate_hours) > 0)) {
-          throw new HttpError(400, 'Enter the estimated hours or amount before marking it as estimated.');
-        }
       }
       if (op === 'create' && d.status === 'estimated' && !(Number(d.estimate_amount) > 0 || Number(d.estimate_hours) > 0)) d.status = 'requested';
-      if (ex && ex.invoice_id && 'billable' in d && !d.billable) throw new HttpError(400, 'This change request is already invoiced, so it cannot be made non-billable.');
     },
     after(op, row, ex, { user }) {
       const note = (text: string): void => {
@@ -241,10 +237,6 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
       } else if (ex && ex.status !== row.status) {
         note(`Status: ${String(ex.status).replace(/_/g, ' ')} → ${String(row.status).replace(/_/g, ' ')}`);
       }
-    },
-    beforeDelete(id, row) {
-      if (row.invoice_id) throw new HttpError(409, 'This change request has been invoiced. Cancel it instead of deleting, so billing history stays intact.');
-      void id;
     },
     onDelete: (id) => {
       db.prepare('UPDATE tasks SET change_request_id=NULL WHERE change_request_id=?').run(id);
@@ -332,6 +324,14 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
         WHEN 'invoice' THEN (SELECT number FROM invoices WHERE id=d.entity_id)
         WHEN 'quote' THEN (SELECT number FROM quotes WHERE id=d.entity_id)
         WHEN 'task' THEN (SELECT title FROM tasks WHERE id=d.entity_id)
+        WHEN 'change_request' THEN (SELECT title FROM change_requests WHERE id=d.entity_id)
+        WHEN 'expense' THEN (SELECT COALESCE(vendor, description) FROM expenses WHERE id=d.entity_id)
+        WHEN 'payment' THEN (SELECT 'Payment ' || date FROM payments WHERE id=d.entity_id)
+        WHEN 'grant' THEN (SELECT name FROM grants WHERE id=d.entity_id)
+        WHEN 'renewal' THEN (SELECT name FROM renewals WHERE id=d.entity_id)
+        WHEN 'asset' THEN (SELECT COALESCE(make_model, asset_type) FROM assets WHERE id=d.entity_id)
+        WHEN 'milestone' THEN (SELECT title FROM milestones WHERE id=d.entity_id)
+        WHEN 'maintenance' THEN (SELECT title FROM maintenance_logs WHERE id=d.entity_id)
         ELSE NULL END AS entity_name`,
     from: 'FROM documents d LEFT JOIN users u ON u.id=d.uploaded_by LEFT JOIN users ow ON ow.id=d.owner_id',
     search: ['d.title', 'd.filename', 'd.category', 'd.notes'],

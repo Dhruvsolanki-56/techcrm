@@ -52,7 +52,23 @@ lead ──convert──▶ client + project (value from an accepted quotation)
                       └─ "Convert to invoice" ──▶ invoice (carries the change request) ──▶ payments
 ```
 
+Billing a project: its agreed value is split into a **payment schedule** (advance → milestones → final). When the work behind a payment is finished it is marked so, an invoice is raised from it, and its state follows that invoice. Sending a quotation to a lead moves the lead to *Proposal Sent*; an accepted quotation of an existing client can start the project directly.
+
+The **Action center** (`analytics/attention.ts`) turns the same data into a ranked to-do list: overdue invoices, payments ready to invoice, accepted quotations nobody acted on, delivered work not billed, finished projects not fully billed, unanswered quotations, leads without a follow-up date, hot leads gone quiet, projects past deadline, renewals and maintenance plans about to lapse.
+
 A project's value is the agreed value plus the **approved** change requests (`cr_value`, `revised_value`). Billing status of a change request is derived from its quote and invoice (`not quoted → quoted → invoiced → paid`), never typed by hand.
+
+### Nothing is locked
+
+Records stay editable in every state: any change-request status can be set at any time, invoiced payments can be changed, a payment schedule can exceed the project value, an incomplete recurring item can be saved. Every create / change / delete is written to a per-record **history** (who, when, field, from → to), shown on each record. Only deletions that would erase money history (an invoice with payments, a client or project with invoices) are refused, with a message saying what to do instead.
+
+### Exports
+
+Lists export to **Excel** and **PDF** only (server-side, same filters and order as the screen). There is no CSV anywhere. Text that looks like a formula is stored as plain text in the workbook.
+
+### Subscriptions
+
+A recurring item belongs to the company (debited automatically as an expense on its date) or to a person (tracked, never deducted). A price that differs for one cycle is set as *Amount for the next cycle only*; the next debit uses it once, then the normal cost applies again. Variable bills (postpaid phone) are recorded as pending estimates until the real amount is entered.
 
 ## Frontend (`web/src`)
 
@@ -82,3 +98,7 @@ A project's value is the agreed value plus the **approved** change requests (`cr
 | API | `server/test` | every endpoint through HTTP (supertest) on an isolated database: CRUD for all resources, pagination and filters, security and access, change-request flow, recurring bills, analytics against SQL, jobs, migrations from the old schema, seed against the workbooks |
 | UI units | `web/test` | forms, data table, modal, API client |
 | End to end | `web/e2e` | a real browser on a real server: setup, lead → CR → quote → invoice → payment, edit / delete, paging, palette, mobile, accessibility |
+
+## TDS
+
+TDS deducted by a client is a tax credit, not money received. Invoices are written for what the client will actually pay; the TDS is recorded on the payment (`payments.tds`, with `tds_status` deducted → certificate → claimed, section and claim date) and is excluded from an invoice's paid amount, from cash and from profit. A project's *not yet invoiced* figure is its value minus TDS minus what is invoiced. `GET /analytics/tds` reports it by Indian financial year (April–March, with the assessment year), client and payment, and the Action center flags an ended year that is still unclaimed.

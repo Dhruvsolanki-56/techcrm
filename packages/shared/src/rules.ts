@@ -102,6 +102,7 @@ export const kindFor = (resource: string, field: string): string => FIELD_RULES[
 
 export function normalize<T>(kind: string, value: T): T {
   const r = RULES[kind];
+  if (kind === 'money' && typeof value === 'number') return (Math.round((value + Number.EPSILON) * 100) / 100) as T; // paise, never fractions of a paisa
   return r && !r.num && r.upper && typeof value === 'string' ? (value.trim().toUpperCase() as T) : value;
 }
 

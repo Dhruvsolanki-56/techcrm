@@ -123,6 +123,7 @@ export function validate(resource: string, items: FormItem[], values: Values): E
     const msg = kind ? check(kind, typeof v === 'string' ? v.trim() : v) : '';
     if (msg) errors[it.name] = `${it.label} ${msg}.`;
   }
+  if (resource === 'leads' && !errors.name && !errors.company && ['client_id', 'company', 'name'].every((k) => values[k] == null || String(values[k]).trim() === '')) errors.name = 'Enter a company, a contact person, or pick an existing client.';
   const dmsg = checkDates(resource, values);
   if (dmsg && !Object.keys(errors).length) errors._form = dmsg;
   return errors;

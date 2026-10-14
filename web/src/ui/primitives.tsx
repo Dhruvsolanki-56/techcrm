@@ -137,6 +137,17 @@ export function ErrorBox({ error, retry }: { error: unknown; retry?(): void }) {
   );
 }
 
+/** A small "this part did not load" notice with a retry, for panels whose siblings still work. */
+export function LoadFailed({ q }: { q: { isError: boolean; error: unknown; refetch(): unknown } }) {
+  if (!q.isError) return null;
+  return (
+    <div className="callout err" role="alert" style={{ marginBottom: 12 }}>
+      This did not load: {q.error instanceof Error ? q.error.message : 'please try again'}.{' '}
+      <button type="button" className="btn sm" onClick={() => void q.refetch()}>Try again</button>
+    </div>
+  );
+}
+
 export function Skeleton({ kind = 'list' }: { kind?: 'list' | 'dash' | 'record' }) {
   const bar = (w: string, h = 10) => <span className="sk" style={{ width: w, height: h }} />;
   const rows = (n: number) => Array.from({ length: n }, (_, i) => (

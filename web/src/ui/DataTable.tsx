@@ -6,6 +6,7 @@ import { lookupOptions } from '../forms/Fields';
 import type { LookupName, OptionList } from '../forms/schema';
 import { useSession } from '../lib/session';
 import { Icon } from './Icon';
+import { ExportMenu } from './ExportMenu';
 import { Ref } from './primitives';
 
 export interface Column<T = Row> {
@@ -41,7 +42,13 @@ interface Props<T> {
   onRows?(rows: T[], total: number): void;
   footer?(rows: T[]): ReactNode;
   initialFilters?: Record<string, string>;
+  /** Set false for lists that have no Excel / PDF export. */
+  exportable?: boolean;
+  /** Show From / To date inputs (filters on the resource's main date). */
+  dates?: boolean;
 }
+
+const NO_EXPORT = new Set(['tasks', 'contacts', 'events']);
 
 export function useDebounced<T>(value: T, ms = 250): T {
   const [v, setV] = useState(value);
@@ -51,9 +58,9 @@ export function useDebounced<T>(value: T, ms = 250): T {
 
 /** A server-paginated, searchable, sortable list of any resource. */
 export function DataTable<T extends Row = Row>({
-  resource, query, columns, filters = [], searchPlaceholder = 'Search…', noSearch, pageSize = 25, defaultSort, onRow, toolbar, empty, noun = 'record', noRef, compact, onRows, footer, initialFilters,
+  resource, query, columns, filters = [], searchPlaceholder = 'Search…', noSearch, pageSize = 25, defaultSort, onRow, toolbar, empty, noun = 'record', noRef, compact, onRows, footer, initialFilters, exportable = true, dates,
 }: Props<T>) {
-  const { lookups } = useSession();
+  const { lookups, isFounder } = useSession();
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
   const [filt, setFilt] = useState<Record<string, string>>(initialFilters ?? {});
@@ -87,14 +94,21 @@ export function DataTable<T extends Row = Row>({
   return (
     <>
       <div className="toolbar">
-        {!noSearch && <input type="search" placeholder={searchPlaceholder} aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />}
+        {!noSearch && !compact && <input type="search" placeholder={searchPlaceholder} aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />}
         {filters.map((f) => (
           <select key={f.key} aria-label={f.label} value={filt[f.key] ?? ''} onChange={(e) => setFilt((x) => ({ ...x, [f.key]: e.target.value }))}>
             <option value="">{f.label}</option>
             {fopts(f).map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
           </select>
         ))}
+        {dates && !compact && (
+          <>
+            <label className="inline-sel"><span className="muted small">From</span><input type="date" aria-label="From date" value={filt.from ?? ''} onChange={(e) => setFilt((x) => ({ ...x, from: e.target.value }))} /></label>
+            <label className="inline-sel"><span className="muted small">To</span><input type="date" aria-label="To date" value={filt.to ?? ''} onChange={(e) => setFilt((x) => ({ ...x, to: e.target.value }))} /></label>
+          </>
+        )}
         <span className="grow" />
+        {isFounder && exportable && !compact && !NO_EXPORT.has(resource) && <ExportMenu path={`/${resource}/export`} params={params} />}
         {toolbar}
       </div>
       <div className="tbl" aria-busy={res.isFetching}>

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useEditor } from '../forms/RecordEditor';
-import { csvUrl } from '../lib/hooks';
+import { ExportMenu } from '../ui/ExportMenu';
 import type { Row } from '../lib/api';
 import { money } from '../lib/format';
 import type { Column } from '../ui/DataTable';
@@ -27,9 +27,7 @@ export function AddBtn({ resource, label, defaults, quiet }: { resource: string;
   return <button type="button" className={`btn ${quiet ? '' : 'primary'}`} onClick={() => editor.open({ resource, defaults })}><Icon name="plus" />{label}</button>;
 }
 
-export const ExportBtn = ({ resource, params }: { resource: string; params?: Record<string, unknown> }) => (
-  <a className="btn" href={csvUrl(resource, params)} download><Icon name="download" />Export CSV</a>
-);
+export const ExportBtn = ({ resource, params }: { resource: string; params?: Record<string, unknown> }) => <ExportMenu path={`/${resource}/export`} params={params} />;
 
 export const Amount = ({ v, neg, dash }: { v: unknown; neg?: boolean; dash?: boolean }) => (
   dash && !Number(v) ? <span className="faint">—</span> : <span className={`tnum ${neg ? 'neg' : ''}`}>{money(v)}</span>

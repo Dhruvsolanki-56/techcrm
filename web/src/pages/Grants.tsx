@@ -1,15 +1,17 @@
 import { GRANT_STATUSES } from '@crm/shared';
 import { useGet } from '../lib/hooks';
 import { fmtDate } from '../lib/format';
+import { useNavigate } from 'react-router-dom';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Page } from '../ui/Page';
 import { Badge, Kpis, Due } from '../ui/primitives';
-import { AddBtn, Amount, Cell2, editCol, ExportBtn } from './common';
+import { AddBtn, Amount, Cell2, editCol} from './common';
 import { money } from '../lib/format';
 
 interface Fin { grants: { requested: number; received: number; n: number }; all_time: { expenses: number } }
 
 export default function Grants() {
+  const nav = useNavigate();
   const fin = useGet<Fin>('/finance/summary');
   const g = fin.data?.grants;
   const cols: Column[] = [
@@ -24,14 +26,14 @@ export default function Grants() {
     editCol('grants', true),
   ];
   return (
-    <Page title="Grants" sub="Funding applied for, received, and how much of it has been spent." actions={<><ExportBtn resource="grants" /><AddBtn resource="grants" label="New grant" /></>}>
+    <Page title="Grants" sub="Funding applied for, received, and how much of it has been spent. Open a grant to see where every rupee went." actions={<AddBtn resource="grants" label="New grant" />}>
       {g && <Kpis items={[
         { label: 'Grants', value: g.n },
         { label: 'Requested', value: money(g.requested) },
         { label: 'Received', value: money(g.received), tone: 'good' },
         { label: 'Still to come', value: money(Math.max(0, g.requested - g.received)) },
       ]} />}
-      <DataTable resource="grants" columns={cols} filters={[{ key: 'status', label: 'All statuses', options: GRANT_STATUSES }]} searchPlaceholder="Search grants…" noun="grant"
+      <DataTable resource="grants" columns={cols} filters={[{ key: 'status', label: 'All statuses', options: GRANT_STATUSES }]} searchPlaceholder="Search grants…" noun="grant" onRow={(r) => nav(`/grants/${r.id}`)}
         empty={{ title: 'No grants yet', text: 'Add a grant you applied for or received.' }} />
     </Page>
   );

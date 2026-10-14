@@ -1,3 +1,4 @@
+import { addDays, today as localToday } from '@crm/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMonths } from '@crm/shared';
 import { runAutoDebits } from '../src/jobs/autoDebit';
@@ -7,15 +8,17 @@ import { ago } from './helpers';
 let d: Demo;
 beforeAll(async () => { d = await createDemo(); });
 afterAll(() => d.app.close());
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 const one = <R>(sql: string, ...p: unknown[]): R => d.app.ctx.db.prepare(sql).get(...p) as R;
 
 describe('validation of automatic debit', () => {
-  it('needs a cost, a repeating cycle and a renewal date', async () => {
+  it('can be saved in any state — an incomplete item simply does not debit until it is complete', async () => {
     const base = { name: 'Rule check', kind: 'subscription', renewal_date: today, cycle: 'monthly', auto_debit: true };
-    expect((await d.F.post('/renewals', { ...base, our_cost: 0 })).s).toBe(400);
-    expect((await d.F.post('/renewals', { ...base, our_cost: 10, cycle: 'one-time' })).s).toBe(400);
-    expect((await d.F.post('/renewals', { ...base, our_cost: 10, renewal_date: undefined })).s).toBe(400);
+    for (const body of [{ ...base, our_cost: 0 }, { ...base, our_cost: 10, cycle: 'one-time' }, { ...base, our_cost: 10, renewal_date: undefined }]) {
+      const r = await d.F.post('/renewals', body);
+      expect(r.s).toBe(201);
+    }
+    expect((await d.F.get('/expenses?q=Rule check')).j).toHaveLength(0);
   });
 });
 
@@ -34,7 +37,7 @@ describe('a fixed subscription', () => {
   it('never records the same payment twice and catches up missed months', () => {
     const ctx = d.app.ctx;
     expect(runAutoDebits(ctx, today)).toHaveLength(0);
-    const far = new Date(Date.now() + 95 * 864e5).toISOString().slice(0, 10);
+    const far = addDays(localToday(), 95);
     const caught = runAutoDebits(ctx, far);
     expect(caught.length).toBeGreaterThanOrEqual(3);
     expect((ctx.db.prepare('SELECT COUNT(*) n FROM (SELECT renewal_id, date FROM expenses WHERE renewal_id IS NOT NULL GROUP BY renewal_id, date HAVING COUNT(*)>1)').get() as { n: number }).n).toBe(0);

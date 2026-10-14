@@ -47,6 +47,3 @@ export function useParam(name: string, fallback = ''): [string, (v: string) => v
   const v = sp.get(name) ?? fallback;
   return [v, (next: string) => setSp((p) => { const n = new URLSearchParams(p); if (next && next !== fallback) n.set(name, next); else n.delete(name); return n; }, { replace: true })];
 }
-
-/** Download the CSV export of a resource (founders only). */
-export const csvUrl = (resource: string, params: Record<string, unknown> = {}): string => `/api/${resource}/export.csv${qs(params)}`;

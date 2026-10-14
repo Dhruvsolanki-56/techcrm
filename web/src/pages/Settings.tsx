@@ -5,7 +5,7 @@ import { useAct, useGet } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
-import { Panel } from '../ui/primitives';
+import { ErrorBox, Panel } from '../ui/primitives';
 import { useToast } from '../ui/Toasts';
 
 type S = Record<string, string>;
@@ -44,6 +44,7 @@ export default function Settings() {
     r.onload = () => setV((x) => ({ ...x, logo: String(r.result) }));
     r.readAsDataURL(file);
   };
+  if (q.isError) return <Page title="Settings"><ErrorBox error={q.error} retry={() => void q.refetch()} /></Page>;
   if (!q.data) return <Page title="Settings"><div className="tbl"><div className="empty">Loading…</div></div></Page>;
   const field = (k: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}, help?: string) => (
     <label className="f"><span>{label}</span><input value={v[k] ?? ''} onChange={set(k)} {...props} />{help && <div className="hint">{help}</div>}</label>

@@ -96,3 +96,12 @@ export function labelOf(list: readonly Option[], value: string | null | undefine
 }
 
 export const values = <T extends readonly Option[]>(list: T): T[number][0][] => list.map(([v]) => v);
+
+export const MILESTONE_KINDS = [['advance', 'Advance'], ['milestone', 'Milestone'], ['final', 'Final payment'], ['retainer', 'Retainer']] as const satisfies readonly Option[];
+/** Ready-made payment schedules: [title, kind, percent of the agreed value]. */
+export const SCHEDULE_TEMPLATES: Record<string, { label: string; items: readonly (readonly [string, string, number])[] }> = {
+  full: { label: '100% on delivery', items: [['Full payment', 'final', 100]] },
+  '50-50': { label: '50% advance, 50% on delivery', items: [['Advance', 'advance', 50], ['Final payment', 'final', 50]] },
+  '40-30-30': { label: '40% advance, 30% mid-way, 30% on go-live', items: [['Advance', 'advance', 40], ['Mid-way milestone', 'milestone', 30], ['Go-live payment', 'final', 30]] },
+  '30-30-40': { label: '30% advance, 30% on design approval, 40% on go-live', items: [['Advance', 'advance', 30], ['Design approval', 'milestone', 30], ['Go-live payment', 'final', 40]] },
+};

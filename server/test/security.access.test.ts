@@ -1,3 +1,5 @@
+import { today as localToday } from '@crm/shared';
+import ExcelJS from 'exceljs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -39,7 +41,7 @@ describe('Access control — interns vs founder-only data', () => {
       const anyId = (db().prepare(`SELECT id FROM ${r} LIMIT 1`).get() as { id: number } | undefined)?.id ?? 1;
       for (const I of [K, T]) {
         const results = [
-          await I.call('GET', `/${r}`), await I.call('GET', `/${r}/${anyId}`), await I.call('GET', `/${r}/export.csv`),
+          await I.call('GET', `/${r}`), await I.call('GET', `/${r}/${anyId}`), await I.call('GET', `/${r}/export.xlsx`), await I.call('GET', `/${r}/export.pdf`),
           await I.call('POST', `/${r}`, { name: 'x', title: 'x', client_id: 1, date: '2026-01-01', amount: 1, kind: 'capital_in' }),
           await I.call('PUT', `/${r}/${anyId}`, { notes: 'x' }), await I.call('DELETE', `/${r}/${anyId}`),
         ];
@@ -168,7 +170,7 @@ describe('Injection & malformed input', () => {
     expect((await F.call('POST', '/events', { title: 'x', date: "2026-01-01' OR 1=1" })).s).toBe(400);
     expect((await F.call('PUT', '/settings', { logo: 'data:image/png;base64,AAAA" onerror="alert(1)' })).s).toBe(400);
   });
-  it('ignores prototype keys, blocks mass assignment and neutralises CSV formulas', async () => {
+  it('ignores prototype keys, blocks mass assignment and keeps spreadsheet formulas inert', async () => {
     await raw('PUT', '/settings', { rawBody: true, body: '{"__proto__":{"polluted":1},"toString":"x","constructor":"y","company_name":"TechSentinals (demo)"}', cookie: F.cookie, headers: { 'Content-Type': 'application/json' } });
     expect(db().prepare("SELECT 1 FROM settings WHERE key IN ('toString','__proto__','polluted')").get()).toBeUndefined();
     expect(({} as { polluted?: number }).polluted).toBeUndefined();
@@ -179,13 +181,18 @@ describe('Injection & malformed input', () => {
     expect(xc.j.created_at.startsWith('1999')).toBe(false);
     expect(xc.j.company).toBe(xss); // stored as-is, escaped at display time (React) and blocked by CSP
     await F.call('POST', '/expenses', { date: '2026-10-01', amount: 1, vendor: '=HYPERLINK("http://evil.test","x")', category: 'Other' });
-    const csv = await F.call('GET', '/expenses/export.csv');
-    expect(csv.s).toBe(200);
+    expect((await F.call('GET', '/expenses/export.xlsx')).s).toBe(200);
   });
-  it('neutralises spreadsheet formulas in the CSV export text', async () => {
-    const r = await raw('GET', '/expenses/export.csv', { cookie: F.cookie });
-    expect(r.text).toContain(`"'=HYPERLINK`);
-    expect(/(^|,)=HYPERLINK/m.test(r.text)).toBe(false);
+  it('writes a formula-looking value into Excel as plain text, never as a formula', async () => {
+    const r = await d.app.request.get('/api/expenses/export.xlsx').set('X-Requested-With', 'crm').set('Cookie', F.cookie).buffer(true)
+      .parse((res, cb) => { const c: Buffer[] = []; res.on('data', (x: Buffer) => c.push(x)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(r.body as never);
+    const cells: unknown[] = [];
+    (wb.worksheets[0] as ExcelJS.Worksheet).eachRow((row) => row.eachCell((c) => cells.push(c.value)));
+    const hit = cells.find((v) => typeof v === 'string' && v.startsWith('=HYPERLINK'));
+    expect(hit).toBeTruthy(); // stored as a string value, not as { formula }
+    expect(cells.some((v) => typeof v === 'object' && v !== null && 'formula' in (v as object))).toBe(false);
   });
 });
 
@@ -272,7 +279,7 @@ describe('Sales, grants and settings behaviour', () => {
     await F.call('PUT', `/leads/${lead.j.id}`, { stage: 'meeting' });
     expect(row<{ closed_on: string | null }>('SELECT closed_on FROM leads WHERE id=?', lead.j.id).closed_on).toBeNull();
     await F.call('POST', '/notes', { entity_type: 'lead', entity_id: lead.j.id, kind: 'call', body: 'Called, wants a demo' });
-    expect(row<{ last_contact: string }>('SELECT last_contact FROM leads WHERE id=?', lead.j.id).last_contact).toBe(new Date().toISOString().slice(0, 10));
+    expect(row<{ last_contact: string }>('SELECT last_contact FROM leads WHERE id=?', lead.j.id).last_contact).toBe(localToday());
   });
   it('serves the sales report to people with sales access only, and keeps grants founder-only', async () => {
     const an = await F.call('GET', '/sales/analytics');

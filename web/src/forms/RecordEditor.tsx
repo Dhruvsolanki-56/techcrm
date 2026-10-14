@@ -3,6 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError, qs, type Row } from '../lib/api';
 import { money } from '../lib/format';
 import { useSession } from '../lib/session';
+import { DocsPanel } from '../components/Docs';
+import { HistoryPanel } from '../components/HistoryPanel';
 import { Modal, useDialogs } from '../ui/Modal';
 import { useToast } from '../ui/Toasts';
 import { FormGrid, validate, type Errors, type Values } from './Fields';
@@ -22,6 +24,12 @@ export interface OpenOpts {
 interface EditorApi { open(o: OpenOpts): void }
 const Ctx = createContext<EditorApi>({ open() {} });
 export const useEditor = (): EditorApi => useContext(Ctx);
+
+/** Records that can carry files (receipts, agreements, reports…): the entity name the files API uses. */
+export const FILE_TYPE: Record<string, string> = {
+  leads: 'lead', clients: 'client', projects: 'project', change_requests: 'change_request', expenses: 'expense', payments: 'payment', grants: 'grant', renewals: 'renewal',
+  assets: 'asset', milestones: 'milestone', maintenance_logs: 'maintenance', tasks: 'task',
+};
 
 const SHARED_LOOKUPS = new Set(['clients', 'projects', 'accounts', 'leads', 'grants']);
 
@@ -64,6 +72,7 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [extra, setExtra] = useState<'files' | 'history' | null>(null);
   const initial = useRef(JSON.stringify(values));
   const dirty = !saving && JSON.stringify(values) !== initial.current;
   const label = RESOURCE_LABEL[resource] ?? resource.replace(/_/g, ' ');
@@ -80,7 +89,7 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
   const optionsFor = (name: string) => {
     if (resource === 'payments' && name === 'invoice_id') {
       return (invoicesQ.data ?? []).filter((i) => i.kind === 'invoice' && !['cancelled', 'draft'].includes(String(i.status)) || i.id === record?.invoice_id)
-        .map((i) => ({ v: i.id, l: `${String(i.number)} — due ${money(Number(i.total) - Number(i.paid_amount))}` }));
+        .map((i) => ({ v: i.id, l: `${String(i.number)} — due ${money(Math.max(0, Number(i.total) - Number(i.paid_amount)))}` }));
     }
     return undefined;
   };
@@ -92,6 +101,7 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
 
   const save = async () => {
     const found = validate(resource, items, values);
+    if (resource === 'leads' && !String(values.company ?? '').trim() && !String(values.name ?? '').trim() && !values.client_id) found.name = 'Enter a company, a person’s name, or pick an existing client.';
     if (Object.keys(found).length) {
       setErrors(found);
       const first = Object.keys(found)[0] as string;
@@ -160,6 +170,16 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
         {formError && <div className="callout err" role="alert" style={{ marginTop: 16 }}>{formError}</div>}
         <button type="submit" hidden />
       </form>
+      {record && (
+        <div className="rec-extra">
+          <div className="seg" role="group" aria-label="More about this record">
+            {FILE_TYPE[resource] && <button type="button" className={extra === 'files' ? 'on' : ''} onClick={() => setExtra(extra === 'files' ? null : 'files')}>Files</button>}
+            <button type="button" className={extra === 'history' ? 'on' : ''} onClick={() => setExtra(extra === 'history' ? null : 'history')}>History</button>
+          </div>
+          {extra === 'files' && FILE_TYPE[resource] && <DocsPanel entityType={FILE_TYPE[resource] as string} entityId={Number(record.id)} />}
+          {extra === 'history' && <HistoryPanel resource={resource} id={Number(record.id)} />}
+        </div>
+      )}
     </Modal>
   );
 }

@@ -30,7 +30,7 @@ export function runAutoDebits(ctx: AppContext, now: string = today()): Debit[] {
   const insert = db.prepare(`INSERT OR IGNORE INTO expenses(date,category,vendor,description,amount,account_id,method,status,notes,project_id,client_id,renewal_id,is_estimate)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const lastReal = db.prepare("SELECT amount FROM expenses WHERE renewal_id=? AND status='paid' AND is_estimate=0 ORDER BY date DESC, id DESC LIMIT 1");
-  const due = db.prepare("SELECT * FROM renewals WHERE status='active' AND auto_debit=1 AND our_cost>0 AND renewal_date IS NOT NULL AND renewal_date<=?").all(now) as Row[];
+  const due = db.prepare("SELECT * FROM renewals WHERE status='active' AND auto_debit=1 AND scope='company' AND our_cost>0 AND renewal_date IS NOT NULL AND renewal_date<=?").all(now) as Row[];
   const founders = db.prepare("SELECT id FROM users WHERE role='founder' AND active=1").all() as { id: number }[];
   const defaultAccount = (): number | null =>
     ((db.prepare("SELECT id FROM accounts WHERE active=1 ORDER BY CASE type WHEN 'bank' THEN 0 ELSE 1 END, id LIMIT 1").get() as { id: number } | undefined)?.id) ?? null;
@@ -45,21 +45,25 @@ export function runAutoDebits(ctx: AppContext, now: string = today()): Debit[] {
       let date: string = r.renewal_date;
       let guard = 0;
       let n = 0;
+      let oneOff = r.next_amount != null && r.next_amount > 0 ? (r.next_amount as number) : null; // "this cycle is different": used once, then normal again
       while (date <= now && guard++ < 36) {
-        const amount = varies ? ((lastReal.get(r.id) as { amount: number } | undefined)?.amount ?? r.our_cost) : r.our_cost;
+        const known = oneOff !== null;
+        const amount = known ? (oneOff as number) : varies ? ((lastReal.get(r.id) as { amount: number } | undefined)?.amount ?? r.our_cost) : r.our_cost;
+        oneOff = null;
+        const estimate = varies && !known;
         const res = insert.run(
           date, categories.includes(r.category) ? r.category : CATEGORY_BY_KIND[r.kind as string] ?? 'Other', r.vendor || r.name,
-          `${r.name} — ${varies ? 'bill (estimate, enter the real amount)' : 'automatic debit'}`, amount, account, 'Auto-debit', varies ? 'pending' : 'paid',
-          varies ? `Estimated from the last bill. Open this expense and enter the actual amount of the "${r.name}" bill.` : `Recorded automatically from the recurring item "${r.name}" (${r.cycle}).`,
-          r.project_id, r.client_id, r.id, varies ? 1 : 0,
+          `${r.name} — ${estimate ? 'bill (estimate, enter the real amount)' : known ? 'automatic debit (amount set for this cycle)' : 'automatic debit'}`, amount, account, 'Auto-debit', estimate ? 'pending' : 'paid',
+          estimate ? `Estimated from the last bill. Open this expense and enter the actual amount of the "${r.name}" bill.` : `Recorded automatically from the recurring item "${r.name}" (${r.cycle}).`,
+          r.project_id, r.client_id, r.id, estimate ? 1 : 0,
         );
         if (res.changes) {
           n++;
-          done.push({ renewal: r.name, date, amount, estimate: varies });
+          done.push({ renewal: r.name, date, amount, estimate });
         }
         date = addMonths(date, step, day);
       }
-      db.prepare('UPDATE renewals SET renewal_date=?, last_debited=? WHERE id=?').run(date, n ? now : r.last_debited, r.id);
+      db.prepare('UPDATE renewals SET renewal_date=?, last_debited=?, next_amount=? WHERE id=?').run(date, n ? now : r.last_debited, n ? null : r.next_amount, r.id);
       if (n) {
         ctx.audit(null, 'create', 'expenses', null, `${r.name}: ${n} ${varies ? 'estimated bill' : 'automatic debit'}${n === 1 ? '' : 's'}`, 'auto-debit');
         const text = varies

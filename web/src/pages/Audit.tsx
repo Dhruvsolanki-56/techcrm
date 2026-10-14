@@ -6,7 +6,7 @@ import { useSession } from '../lib/session';
 import { useDebounced } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
-import { pretty } from '../ui/primitives';
+import { ErrorBox, pretty } from '../ui/primitives';
 
 const PAGE = 100;
 const ACTIONS = ['create', 'update', 'delete', 'login', 'login_failed', 'password_change', 'password_reset', 'upload', 'download', 'export', 'convert', 'renew', 'vault_reveal', 'backup', '2fa_on', '2fa_reset'];
@@ -29,7 +29,7 @@ export default function Audit() {
         <select aria-label="Person" value={f.user_id} onChange={set('user_id')}><option value="">Anyone</option>{lookups.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
       </div>
       <div className="tbl">
-        {!rows.length ? <div className="empty"><b>{res.isPending ? 'Loading…' : 'Nothing logged'}</b></div> : (
+        {res.isError ? <ErrorBox error={res.error} retry={() => void res.refetch()} /> : !rows.length ? <div className="empty"><b>{res.isPending ? 'Loading…' : 'Nothing logged'}</b></div> : (
           <div className="tbl-scroll" tabIndex={0}>
             <table className="t">
               <thead><tr><th>When</th><th>Who</th><th>Action</th><th>What</th><th className="opt">From</th></tr></thead>

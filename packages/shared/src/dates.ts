@@ -39,3 +39,25 @@ export const lastMonths = (n: number, from: Date = new Date()): string[] => Arra
 export const CYCLE_MONTHS: Record<string, number | null> = {
   monthly: 1, quarterly: 3, 'half-yearly': 6, yearly: 12, biennial: 24, triennial: 36, 'one-time': null,
 };
+
+/** Indian financial year (1 April – 31 March) of a date, e.g. 2026-10-14 → "2026-27". */
+export function fyOf(date: string): string {
+  const d = asDate(date);
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+}
+/** First and last day of a financial year given as "2026-27". */
+export function fyRange(fy: string): { from: string; to: string } {
+  const y = Number(fy.slice(0, 4));
+  return { from: `${y}-04-01`, to: `${y + 1}-03-31` };
+}
+/** Assessment year in which a financial year's income and TDS are declared: "2026-27" → "2027-28". */
+export function assessmentYear(fy: string): string {
+  const y = Number(fy.slice(0, 4)) + 1;
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+}
+export const TDS_STATUSES: [string, string][] = [
+  ['deducted', 'Deducted — certificate awaited'],
+  ['certificate', 'Certificate (Form 16A) received'],
+  ['claimed', 'Claimed in ITR'],
+];

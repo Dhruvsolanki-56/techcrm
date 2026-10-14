@@ -5,7 +5,7 @@ import { useAct, useGet } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import { Icon } from '../ui/Icon';
 import { Modal, useDialogs } from '../ui/Modal';
-import { Empty } from '../ui/primitives';
+import { Empty, LoadFailed } from '../ui/primitives';
 import { useToast } from '../ui/Toasts';
 import { ExtLink } from '../ui/primitives';
 
@@ -62,6 +62,7 @@ export function CredentialsPanel({ client_id, project_id, q }: { client_id?: num
 
   return (
     <div>
+      <LoadFailed q={list} />
       <div className="toolbar"><span className="grow" /><button type="button" className="btn primary" onClick={() => setEditing('new')}><Icon name="plus" />Add credential</button></div>
       {list.data?.length ? (
         <div className="panel"><div className="list">
