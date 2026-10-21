@@ -9,13 +9,13 @@ interface Delivery { change_requests: { open: number; avg_days_to_approval: numb
 
 export default function ChangeRequests() {
   const { isFounder } = useSession();
-  const [view, setView] = useParam('view', 'board');
+  const [view, setView] = useParam('view', 'list');
   const a = useGet<Delivery>('/analytics/delivery');
   const cr = a.data?.change_requests;
   const m = cr?.money;
   return (
     <Page title="Change requests" sub="Anything a client asks to change or add — before or after delivery — from request to quotation to invoice."
-      actions={<Seg value={view as 'board' | 'list'} onChange={setView} options={[['board', 'Board'], ['list', 'List']]} />}>
+      actions={<Seg value={view as 'board' | 'list'} onChange={setView} options={[['list', 'List'], ['board', 'Board']]} />}>
       {cr && (
         <Kpis items={[
           { label: 'Open', value: cr.open, sub: 'Not yet delivered or closed' },

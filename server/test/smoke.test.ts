@@ -73,19 +73,19 @@ describe('interns only see their own work', () => {
 });
 
 describe('invoices and payments', () => {
-  it('computes GST, settles with TDS and numbers invoices per financial year', async () => {
+  it('totals invoices without any tax, settles with TDS and numbers invoices per financial year', async () => {
     const invs = (await d.F.list('/invoices')).j as Record<string, any>[];
     const by = (t: string) => invs.find((i) => i.title === t) as Record<string, any>;
-    expect(by('Fleet portal — advance 30%')).toMatchObject({ total: 159300, status: 'paid', paid_amount: 159300 });
-    expect(by('Fleet portal — milestone 1')).toMatchObject({ total: 106200, status: 'overdue', paid_amount: 50000, balance: 56200 });
-    expect(by('Website maintenance — last month')).toMatchObject({ status: 'paid', paid_amount: 7080 });
+    expect(by('Fleet portal — advance 30%')).toMatchObject({ total: 135000, status: 'paid', paid_amount: 135000 });
+    expect(by('Fleet portal — milestone 1')).toMatchObject({ total: 90000, status: 'overdue', paid_amount: 50000, balance: 40000 });
+    expect(by('Website maintenance — last month')).toMatchObject({ status: 'paid', paid_amount: 6000 });
     expect(by('Online store — final').status).toBe('sent');
     expect(invs.every((i) => /^INV\/\d{4}-\d{2}\/\d{4}$/.test(i.number))).toBe(true);
     expect(new Set(invs.map((i) => i.number)).size).toBe(invs.length);
   });
   it('flips an invoice to paid on the final payment and reopens it when that payment is deleted', async () => {
     const m1 = ((await d.F.list('/invoices')).j as Record<string, any>[]).find((i) => i.title === 'Fleet portal — milestone 1') as Record<string, any>;
-    const pay = await d.F.post('/payments', { invoice_id: m1.id, date: '2026-10-01', amount: 56200 });
+    const pay = await d.F.post('/payments', { invoice_id: m1.id, date: '2026-10-01', amount: 40000 });
     expect(pay.s).toBe(201);
     expect((await d.F.get(`/invoices/${m1.id}`)).j.status).toBe('paid');
     await d.F.del(`/payments/${pay.j.id}`);
@@ -101,17 +101,17 @@ describe('invoices and payments', () => {
     expect(sum.accounts).toHaveLength(2);
     expect(sum.trend).toHaveLength(12);
     const acc = sum.accounts.find((a: { name: string }) => a.name.startsWith('HDFC'));
-    const expected = 250000 + sum.income.cash + 800000 - 50000 - (24000 + 7800 + 9200 + 30000 + 18000 + 18000);
+    const expected = 250000 + sum.income.cash + 800000 - 50000 - (24000 + 7800 + 9200 + 30000 + 18000 + 18000) - 5400; // the hosting the company pays for was debited on its date
     expect(Math.abs(acc.balance - expected)).toBeLessThan(1);
     expect(sum.founders.find((f: { name: string }) => f.name.startsWith('Isha')).company_owes).toBe(15000);
   });
 });
 
 describe('quotes, lead conversion, clients and the vault', () => {
-  it('prices a quote with GST and carries it through lead conversion into an invoice', async () => {
+  it('prices a quote and carries it through lead conversion into an invoice', async () => {
     const quotes = (await d.F.list('/quotes')).j;
     expect(quotes).toHaveLength(1);
-    expect(quotes[0].total).toBe(383500);
+    expect(quotes[0].total).toBe(325000);
     const lead = ((await d.F.list('/leads')).j as { id: number; company: string }[]).find((l) => l.company === 'Kumar Textiles');
     const conv = await d.F.post(`/leads/${lead?.id}/convert`, { create_project: true });
     expect(conv.s).toBe(200);
@@ -121,7 +121,7 @@ describe('quotes, lead conversion, clients and the vault', () => {
     expect(q2.client_id).toBe(conv.j.client_id);
     const toInv = await d.F.post(`/quotes/${q2.id}/to-invoice`);
     expect(toInv.s).toBe(200);
-    expect((await d.F.get(`/invoices/${toInv.j.invoice_id}`)).j.total).toBe(383500);
+    expect((await d.F.get(`/invoices/${toInv.j.invoice_id}`)).j.total).toBe(325000);
   });
   it('protects clients with history from deletion', async () => {
     const acme = ((await d.F.list('/clients')).j as { id: number; company: string }[]).find((c) => c.company.startsWith('Acme'));

@@ -19,8 +19,6 @@ describe('field rules (shared by the browser and the API)', () => {
     expect(check('email', 'ravi@')).toMatch(/valid email/);
     expect(check('url', 'site.co.in/path')).toBe('');
     expect(check('url', 'not a site')).toMatch(/web address/);
-    expect(check('gstin', '27abcde1234f1z5')).toBe('');
-    expect(check('gstin', '27ABCDE1234F1Z')).toMatch(/15 characters/);
     expect(check('pan', 'ABCDE1234F')).toBe('');
     expect(check('ifsc', 'HDFC0001234')).toBe('');
     expect(check('upi', 'name@bank')).toBe('');
@@ -38,11 +36,10 @@ describe('field rules (shared by the browser and the API)', () => {
     expect(check('person', 'x'.repeat(81))).toMatch(/too long/);
   });
   it('knows which rule each resource field follows and normalises capitals', () => {
-    expect(kindFor('clients', 'gstin')).toBe('gstin');
+    expect(kindFor('clients', 'gstin')).toBe(''); // there is no GST here
     expect(kindFor('leads', 'name')).toBe('words');
     expect(kindFor('change_requests', 'estimate_amount')).toBe('money');
     expect(kindFor('leads', 'unknown')).toBe('');
-    expect(normalize('gstin', ' 27abcde1234f1z5 ')).toBe('27ABCDE1234F1Z5');
     expect(normalize('person', ' x ')).toBe(' x ');
   });
   it('validates real calendar dates and date order', () => {
@@ -96,12 +93,11 @@ describe('money', () => {
     expect(inWords(12345678.5)).toBe('Rupees One Crore Twenty Three Lakh Forty Five Thousand Six Hundred Seventy Eight and Fifty Paise Only');
     expect(inWords(99.99)).toBe('Rupees Ninety Nine and Ninety Nine Paise Only');
   });
-  it('totals a quote with discount and GST', () => {
+  it('totals a quote with a discount and never adds tax', () => {
     const items = [{ description: 'A', qty: 1, rate: 280000 }, { description: 'B', qty: 1, rate: 45000 }];
-    expect(computeTotals(items, 0, 18, 'cgst_sgst')).toEqual({ subtotal: 325000, discount: 0, tax_amount: 58500, total: 383500 });
-    expect(computeTotals(items, 25000, 18, 'igst').total).toBe(354000);
-    expect(computeTotals(items, 0, 18, 'none').total).toBe(325000);
-    expect(computeTotals(items, 999999, 18, 'none').total).toBe(0); // discount cannot exceed the subtotal
+    expect(computeTotals(items, 0)).toEqual({ subtotal: 325000, discount: 0, tax_amount: 0, total: 325000 });
+    expect(computeTotals(items, 25000).total).toBe(300000);
+    expect(computeTotals(items, 999999999).total).toBe(0); // a discount can never take it below zero
   });
 });
 

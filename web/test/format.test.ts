@@ -1,11 +1,20 @@
-import { addDays, today } from '@crm/shared';
+import { addDays, parseDate, today } from '@crm/shared';
 import { describe, expect, it } from 'vitest';
-import { fmtDate, fmtMonth, initials, pct, plural, relDay } from '../src/lib/format';
+import { fmtDate, fmtDateTime, fmtMonth, initials, pct, plural, relDay } from '../src/lib/format';
 
 describe('formatting helpers', () => {
-  it('writes dates the way people say them', () => {
+  it('reads what people type as a date', () => {
+    for (const t of ['21 Jan 2026', '21-01-2026', '21/1/2026', '21012026', '21 january 2026', '2026-01-21', '21-Jan-26']) expect(parseDate(t), t).toBe('2026-01-21');
+    expect(parseDate('21 Jan 20', true)).toBeNull();
+    for (const t of ['31 Feb 2026', '32-01-2026', 'abc', '21 Foo 2026', '']) expect(parseDate(t), t).toBeNull();
+  });
+  it('writes every date as 21 Jan 2026 and every moment as 21 Jan 2026, 01:30 PM', () => {
     expect(fmtDate('2026-08-30')).toBe('30 Aug 2026');
-    expect(fmtDate('2026-08-30 10:00:00')).toBe('30 Aug 2026');
+    expect(fmtDate('2026-01-05 10:00:00')).toBe('05 Jan 2026');
+    expect(fmtDateTime(new Date(2026, 0, 21, 13, 30).toISOString())).toBe('21 Jan 2026, 01:30 PM');
+    expect(fmtDateTime(new Date(2026, 0, 21, 0, 5).toISOString())).toBe('21 Jan 2026, 12:05 AM');
+    expect(fmtDateTime('2026-01-21 00:05:00+05:30').endsWith('AM') || fmtDateTime('2026-01-21 00:05:00+05:30').endsWith('PM')).toBe(true);
+    expect(fmtDateTime('2026-01-21')).toBe('21 Jan 2026');
     expect(fmtDate(null)).toBe('—');
     expect(fmtMonth('2026-03')).toBe('Mar 26');
   });

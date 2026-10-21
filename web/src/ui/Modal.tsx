@@ -6,7 +6,7 @@ const stack: symbol[] = [];
 
 interface ModalProps {
   title: string;
-  sub?: string;
+  sub?: ReactNode;
   size?: 'sm' | '' | 'wide' | 'xl';
   /** True when the form has unsaved changes: a click outside is ignored and Esc asks first. */
   dirty?: boolean;

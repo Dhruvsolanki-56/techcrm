@@ -1,4 +1,5 @@
-import { addDays, check, checkDates, computeTotals, daysUntil, inWords, TAX_TYPES, today, type LineItem } from '@crm/shared';
+import { DateInput } from '../ui/DateInput';
+import { addDays, check, checkDates, computeTotals, daysUntil, inWords, today, type LineItem } from '@crm/shared';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DocsPanel } from '../components/Docs';
@@ -16,14 +17,15 @@ import { Page, SectionH } from '../ui/Page';
 import { Badge, Crumb, ErrorBox, Kpis, Skeleton } from '../ui/primitives';
 import { useToast } from '../ui/Toasts';
 import { money2 } from '@crm/shared';
+import { ProjectLink } from './common';
 
 type Kind = 'quotes' | 'invoices';
-interface Item { description: string; hsn?: string; qty: number | string; rate: number | string }
-interface Settings extends Record<string, string | number | null> { company_name: string; company_address: string; company_email: string; company_phone: string; gstin: string; pan: string; logo: string | null }
+interface Item { description: string; qty: number | string; rate: number | string }
+interface Settings extends Record<string, string | number | null> { company_name: string; company_address: string; company_email: string; company_phone: string; pan: string; logo: string | null }
 
 /* ============================ editor ============================ */
 function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind; doc: Row | null; defaults: Record<string, string>; s: Settings; onClose(): void; onSaved(r: Row): void }) {
-  const { lookups, isFounder } = useSession();
+  const { lookups } = useSession();
   const isInvoice = kind === 'invoices';
   const label = isInvoice ? 'invoice' : 'quotation';
   const lead = defaults.lead ? lookups.leads.find((l) => String(l.id) === defaults.lead) : undefined;
@@ -32,10 +34,10 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
     change_request_id: String(doc?.change_request_id ?? defaults.cr ?? ''),
     kind: String(doc?.kind ?? 'invoice'), title: String(doc?.title ?? (lead ? `Proposal for ${lead.company || lead.name}` : '')), issue_date: String(doc?.issue_date ?? today()),
     due_date: String(doc?.due_date ?? addDays(today(), 15)), valid_until: String(doc?.valid_until ?? addDays(today(), 30)), number: String(doc?.number ?? ''),
-    tax_type: String(doc?.tax_type ?? (s.gstin ? s.default_tax_type : 'none') ?? 'none'), tax_rate: String(doc?.tax_rate ?? s.default_tax_rate ?? 18), discount: String(doc?.discount ?? 0),
+    discount: String(doc?.discount ?? 0), expected_tds: String(doc?.expected_tds ?? ''),
     terms: String(doc?.terms ?? (isInvoice ? s.terms_invoice : s.terms_quote) ?? ''), notes: String(doc?.notes ?? ''),
   }));
-  const [items, setItems] = useState<Item[]>(() => ((doc?.items as Item[] | undefined)?.length ? (doc?.items as Item[]).map((i) => ({ ...i })) : [{ description: '', hsn: '', qty: 1, rate: '' }]));
+  const [items, setItems] = useState<Item[]>(() => ((doc?.items as Item[] | undefined)?.length ? (doc?.items as Item[]).map((i) => ({ ...i })) : [{ description: '', qty: 1, rate: '' }]));
   const [err, setErr] = useState('');
   const [saved, setSaved] = useState(false);
   const initial = useState(() => JSON.stringify([v, items]))[0];
@@ -43,15 +45,14 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV((x) => ({ ...x, [k]: e.target.value, ...(k === 'client_id' ? { project_id: '', change_request_id: '' } : {}), ...(k === 'project_id' ? { change_request_id: '' } : {}) }));
 
   const lines: LineItem[] = items.map((i) => ({ description: i.description, qty: Number(i.qty) || 0, rate: Number(i.rate) || 0 }));
-  const t = computeTotals(lines, Number(v.discount) || 0, Number(v.tax_rate) || 0, v.tax_type);
-  const rate = v.tax_type === 'none' ? 0 : Number(v.tax_rate) || 0;
+  const t = computeTotals(lines, Number(v.discount) || 0);
   const projects = lookups.projects.filter((p) => !v.client_id || String(p.client_id) === v.client_id);
   const crs = useGet<Row[]>(v.project_id ? '/change_requests' : null, { project_id: v.project_id, limit: 100 }).data ?? [];
 
   const save = useAct(async (markSent: boolean) => {
     const data: Record<string, unknown> = { ...v, items: items.filter((i) => i.description || i.rate).map((i) => ({ ...i, qty: Number(i.qty), rate: Number(i.rate) })) };
     for (const k of ['client_id', 'lead_id', 'project_id', 'change_request_id']) if (!data[k]) data[k] = null;
-    if (!isInvoice) { delete data.kind; delete data.due_date; } else { delete data.valid_until; delete data.lead_id; }
+    if (!isInvoice) { delete data.kind; delete data.due_date; delete data.expected_tds; } else { delete data.valid_until; delete data.lead_id; data.expected_tds = v.expected_tds === '' ? 0 : Number(v.expected_tds); }
     if (!doc) delete data.number;
     if (markSent) data.status = 'sent';
     return doc ? api.put<Row>(`/${kind}/${doc.id}`, data) : api.post<Row>(`/${kind}`, data);
@@ -68,8 +69,8 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
       const m = check('money', it.rate);
       if (m || it.rate === '') return setErr(`Line ${i + 1}: rate ${m || 'is required'}.`);
     }
-    const pm = check('percent', v.tax_rate) || (check('money', v.discount) && `Discount ${check('money', v.discount)}`);
-    if (pm) return setErr(String(pm).startsWith('Discount') ? `${pm}.` : `Tax rate ${pm}.`);
+    const dm0 = check('money', v.discount) || (v.expected_tds !== '' && check('money', v.expected_tds));
+    if (dm0) return setErr(`${check('money', v.discount) ? 'Discount' : 'TDS'} ${dm0}.`);
     const dm = checkDates(kind, { issue_date: v.issue_date, due_date: v.due_date, valid_until: v.valid_until });
     if (dm) return setErr(dm);
     save.mutate(markSent, { onError: (e) => setErr(e.message) });
@@ -79,7 +80,7 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
 
   return (
     <Modal title={doc ? `Edit ${label} ${String(doc.number)}` : `New ${label}`} size="xl" dirty={dirty} onClose={onClose}
-      sub={doc ? String(doc.client_name ?? doc.lead_name ?? '') : isInvoice ? 'A bill. Once sent it counts as money owed to you (and as GST). Saved as a draft until you send it.' : 'An offer. Nothing is owed until the client accepts; then start the project or raise the invoice.'}
+      sub={doc ? String(doc.client_name ?? doc.lead_name ?? '') : isInvoice ? 'A bill. Once sent it counts as money owed to you. Saved as a draft until you send it.' : 'An offer. Nothing is owed until the client accepts; then start the project or raise the invoice.'}
       footer={<>
         <button type="button" className="btn" onClick={onClose}>Cancel</button>
         {canSend ? (
@@ -98,33 +99,31 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
           {v.project_id && (
             <label className="f"><span>For change request</span><select value={v.change_request_id} onChange={set('change_request_id')}><option value="">— none —</option>{crs.map((c) => <option key={c.id} value={c.id}>{String(c.ref)} · {String(c.title)}</option>)}</select></label>
           )}
-          {isInvoice && <label className="f"><span>Type <i>*</i></span><select value={v.kind} onChange={set('kind')}><option value="invoice">Tax invoice</option><option value="proforma">Proforma invoice</option></select></label>}
+          {isInvoice && <label className="f"><span>Type <i>*</i></span><select value={v.kind} onChange={set('kind')}><option value="invoice">Invoice</option><option value="proforma">Proforma invoice</option></select></label>}
           <label className="f full"><span>What it is for</span><input value={v.title} onChange={set('title')} placeholder="e.g. Website development — Phase 1" /></label>
-          <label className="f"><span>Issue date</span><input type="date" value={v.issue_date} onChange={set('issue_date')} /></label>
-          {isInvoice ? <label className="f"><span>Due date</span><input type="date" value={v.due_date} onChange={set('due_date')} /></label> : <label className="f"><span>Valid until</span><input type="date" value={v.valid_until} onChange={set('valid_until')} /></label>}
-          {doc && isFounder && <label className="f"><span>Number</span><input value={v.number} onChange={set('number')} /><div className="hint">Change only to match a manual number.</div></label>}
+          <label className="f"><span>Issue date</span><DateInput value={v.issue_date} onChange={set('issue_date')} /></label>
+          {isInvoice ? <label className="f"><span>Due date</span><DateInput value={v.due_date} onChange={set('due_date')} /></label> : <label className="f"><span>Valid until</span><DateInput value={v.valid_until} onChange={set('valid_until')} /></label>}
+          {doc && <div className="f"><span>Number</span><div className="mono" style={{ padding: '7px 0' }}>{String(doc.number)}</div><div className="hint">Numbers are fixed once given.</div></div>}
         </div>
-        <div className="fsec"><b>Line items</b><span>HSN/SAC is optional.</span></div>
+        <div className="fsec"><b>Line items</b></div>
         <div className="items">
-          <div className="item-row item-head"><span>Description</span><span>HSN/SAC</span><span className="right">Qty</span><span className="right">Rate (₹)</span><span className="right">Amount</span><span /></div>
+          <div className="item-row item-head"><span>Description</span><span className="right">Qty</span><span className="right">Rate (₹)</span><span className="right">Amount</span><span /></div>
           {items.map((it, i) => (
             <div className="item-row" key={i}>
               <textarea rows={1} value={it.description} placeholder="Describe the work or product" aria-label="Description" onChange={(e) => { upd(i, 'description', e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight + 2}px`; }} />
-              <input value={it.hsn ?? ''} placeholder="998314" aria-label="HSN/SAC" onChange={(e) => upd(i, 'hsn', e.target.value)} />
               <input type="number" step="any" min="0" className="right" aria-label="Quantity" value={it.qty} onChange={(e) => upd(i, 'qty', e.target.value)} />
               <input type="number" step="any" min="0" className="right" aria-label="Rate" placeholder="0.00" value={it.rate} onChange={(e) => upd(i, 'rate', e.target.value)} />
               <div className="right tnum amt">{money2((Number(it.qty) || 0) * (Number(it.rate) || 0))}</div>
               <button type="button" className="btn ghost sm icon" title="Remove line" aria-label="Remove line" disabled={items.length < 2} onClick={() => setItems((x) => x.filter((_, n) => n !== i))}><Icon name="x" /></button>
             </div>
           ))}
-          <button type="button" className="btn sm ghost add-line" onClick={() => setItems((x) => [...x, { description: '', hsn: '', qty: 1, rate: '' }])}><Icon name="plus" />Add line</button>
+          <button type="button" className="btn sm ghost add-line" onClick={() => setItems((x) => [...x, { description: '', qty: 1, rate: '' }])}><Icon name="plus" />Add line</button>
         </div>
         <div className="ed-bottom">
           <div className="stack" style={{ gap: 14 }}>
-            <div className="form-grid cols3">
-              <label className="f"><span>Tax <i>*</i></span><select value={v.tax_type} onChange={set('tax_type')}>{TAX_TYPES.map(([a, b]) => <option key={a} value={a}>{b}</option>)}</select></label>
-              <label className="f"><span>Rate %</span><input type="number" step="any" min="0" value={v.tax_rate} onChange={set('tax_rate')} /></label>
+            <div className="form-grid">
               <label className="f"><span>Discount (₹)</span><input type="number" step="0.01" min="0" value={v.discount} onChange={set('discount')} /></label>
+              {isInvoice && <label className="f"><span>TDS the client will deduct (₹, optional)</span><input type="number" step="0.01" min="0" value={v.expected_tds} onChange={set('expected_tds')} aria-label="Expected TDS" /><div className="hint">Leave empty if none. It is not part of this invoice; it is tracked for your income-tax return and filled into the payment.</div></label>}
             </div>
             <label className="f"><span>Terms &amp; conditions</span><textarea rows={3} value={v.terms} onChange={set('terms')} /></label>
             <label className="f"><span>Note printed on the document</span><textarea rows={2} value={v.notes} onChange={set('notes')} /></label>
@@ -132,8 +131,6 @@ function EditorModal({ kind, doc, defaults, s, onClose, onSaved }: { kind: Kind;
           <div className="totbox">
             <div className="row spread"><span className="muted">Subtotal</span><span className="tnum">{money2(t.subtotal)}</span></div>
             {t.discount > 0 && <div className="row spread"><span className="muted">Discount</span><span className="tnum">− {money2(t.discount)}</span></div>}
-            {v.tax_type === 'cgst_sgst' && <><div className="row spread"><span className="muted">CGST {rate / 2}%</span><span className="tnum">{money2(t.tax_amount / 2)}</span></div><div className="row spread"><span className="muted">SGST {rate / 2}%</span><span className="tnum">{money2(t.tax_amount / 2)}</span></div></>}
-            {v.tax_type === 'igst' && <div className="row spread"><span className="muted">IGST {rate}%</span><span className="tnum">{money2(t.tax_amount)}</span></div>}
             <div className="row spread grand"><span>Total</span><span className="tnum">{money2(t.total)}</span></div>
             <div className="faint small" style={{ marginTop: 6 }}>{inWords(t.total)}</div>
           </div>
@@ -180,16 +177,18 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
   const lead = useGet<Row>(d.lead_id && !d.client_id ? `/leads/${d.lead_id}` : null).data;
   const pays = useGet<Row[]>(isInvoice ? '/payments' : null, { invoice_id: d.id, limit: 100 }).data ?? [];
   const [reminder, setReminder] = useState(false);
+  const madeInvoices = useGet<Row[]>(!isInvoice && d.id ? '/invoices' : null, { quote_id: d.id, limit: 20 }).data ?? [];
   const setStatus = useAct((status: string) => api.put(`/${kind}/${d.id}`, { status }), 'Updated');
   const toInvoice = useAct(() => api.post<{ invoice_id: number }>(`/quotes/${d.id}/to-invoice`), 'Draft invoice created', (r) => nav(`/invoices/${r.invoice_id}`));
-  const dup = useAct(() => api.post<Row>(`/${kind}`, { client_id: d.client_id, lead_id: d.lead_id, project_id: d.project_id, title: d.title, items: d.items, discount: d.discount, tax_type: d.tax_type, tax_rate: d.tax_rate, terms: d.terms, notes: d.notes, kind: d.kind }),
+  const dup = useAct(() => api.post<Row>(`/${kind}`, { client_id: d.client_id, lead_id: d.lead_id, project_id: d.project_id, title: d.title, items: d.items, discount: d.discount, expected_tds: d.expected_tds, terms: d.terms, notes: d.notes, kind: d.kind }),
     'Duplicated as a new draft', (r) => nav(`/${kind}/${r.id}?edit=1`));
-  const startProject = useAct(() => api.post<{ project_id: number }>(`/quotes/${d.id}/start-project`), 'Project created from the quotation', (r) => nav(`/projects/${r.project_id}?tab=finance`));
+  const startProject = useAct(() => api.post<{ project_id: number }>(`/quotes/${d.id}/start-project`), 'Project created from the quotation', (r) => nav(`/projects/${r.project_id}?tab=finance&plan=1`));
+  // accepting is one step: the lead, the client and the project follow, and you land on the project to plan its payments
+  const accept = useAct(() => api.put<Row>(`/quotes/${d.id}`, { status: 'accepted' }), 'Quotation accepted', (r) => { if (r.project_id && !d.change_request_id) nav(`/projects/${String(r.project_id)}?tab=finance&plan=1`); });
   if (!s) return <Skeleton kind="record" />;
 
   const items = (d.items as Item[]) ?? [];
-  const title = !isInvoice ? 'QUOTATION' : d.kind === 'proforma' ? 'PROFORMA INVOICE' : s.gstin ? 'TAX INVOICE' : 'INVOICE';
-  const half = Number(d.tax_rate) / 2;
+  const title = !isInvoice ? 'QUOTATION' : d.kind === 'proforma' ? 'PROFORMA INVOICE' : 'INVOICE';
   const balance = Math.max(0, Number(d.total) - Number(d.paid_amount || 0));
   const credit = Math.max(0, Number(d.paid_amount || 0) - Number(d.total));
   const stamp = isInvoice && d.status === 'paid' ? <span className="stamp" style={{ color: '#12805c' }}>PAID</span> : d.status === 'cancelled' ? <span className="stamp" style={{ color: '#c8352f' }}>CANCELLED</span> : null;
@@ -202,6 +201,14 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
         <div className="row" style={{ gap: 10 }}><h1>{who}</h1><Badge value={d.status} />{d.kind === 'proforma' && <span className="tag">Proforma</span>}</div>
         <div className="sub">{String(d.title ?? '')}{d.quote_number ? <> · from quotation <Link className="ln" to={`/quotes/${d.quote_id}`}>{String(d.quote_number)}</Link></> : null}
           {d.change_request_title ? <> · change request: {String(d.change_request_title)}</> : null}</div>
+        <div className="row wrap small" style={{ gap: 14, marginTop: 6 }} aria-label="Related records">
+          {d.client_id ? <Link className="ln" to={`/clients/${String(d.client_id)}`}>Client: {String(d.client_name ?? '')}</Link> : null}
+          {d.lead_id ? <Link className="ln" to={`/leads/${String(d.lead_id)}`}>Lead: {String(d.lead_name ?? 'open')}</Link> : null}
+          {d.project_id ? <Link className="ln" to={`/projects/${String(d.project_id)}?tab=finance`}>Project: {String(d.project_name ?? '')}</Link> : null}
+          {d.change_request_id ? <Link className="ln" to={`/projects/${String(d.project_id)}?tab=changes`}>Change request: {String(d.change_request_title ?? '')}</Link> : null}
+          {!isInvoice && madeInvoices.length ? madeInvoices.map((i) => <Link key={String(i.id)} className="ln" to={`/invoices/${String(i.id)}`}>Invoice {String(i.number)}</Link>) : null}
+          {isInvoice && d.client_id ? <Link className="ln" to={`/analytics?tab=receivables`}>Still to get from this client</Link> : null}
+        </div>
         <div className="small muted" style={{ marginTop: 4 }}>{isInvoice ? 'Invoice — a bill for work done or agreed. It is counted as money owed until payments are recorded against it.' : 'Quotation — an offer before any work. It owes nothing and can be changed, rejected or expire; accepting it starts a project or becomes an invoice.'}</div>
       </div></div>
       <div className="no-print row wrap" style={{ gap: 8 }}>
@@ -220,15 +227,17 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
         )}
         {!isInvoice && ['sent', 'draft', 'expired'].includes(st) && (
           <>
-            <button type="button" className="btn" onClick={() => setStatus.mutate('accepted')}>Accepted</button>
+            <button type="button" className="btn primary" onClick={() => accept.mutate()}>{d.change_request_id ? 'Client accepted' : 'Client accepted — start the work'}</button>
             <button type="button" className="btn" onClick={() => setStatus.mutate('rejected')}>Rejected</button>
           </>
         )}
-        {!isInvoice && d.client_id && !d.project_id && !d.change_request_id ? <button type="button" className="btn primary" onClick={() => startProject.mutate()}>Accept &amp; start project</button> : null}
-        {!isInvoice && d.client_id ? <button type="button" className="btn" onClick={() => toInvoice.mutate()}>Convert to invoice</button> : null}
+        {!isInvoice && st === 'accepted' && !d.project_id && !d.change_request_id && (d.client_id || d.lead_id) && !['rejected', 'expired'].includes(st) ? <button type="button" className="btn primary" onClick={() => startProject.mutate()}>Start the project</button> : null}
+        {!isInvoice && d.project_id && !d.change_request_id ? <Link className="btn" to={`/projects/${String(d.project_id)}?tab=finance`}>Open the project plan</Link> : null}
+        {!isInvoice && d.change_request_id && !['rejected', 'expired'].includes(st) && d.client_id ? <button type="button" className="btn" onClick={() => toInvoice.mutate()}>Convert to invoice</button> : null}
       </div>
+      {isInvoice && Number(d.expected_tds) > 0 && <div className="callout info no-print" style={{ marginBottom: 14 }}>The client will also deduct {money2(d.expected_tds)} TDS. That is not part of this invoice — it is tracked for your income-tax return, and the payment form fills it in for you.</div>}
       <Kpis className="no-print" items={[
-        { label: 'Total', value: money2(d.total), sub: d.tax_type === 'none' ? 'No tax' : `incl. ${d.tax_type === 'igst' ? 'IGST' : 'GST'} ${money2(d.tax_amount)}` },
+        { label: 'Total', value: money2(d.total), sub: Number(d.discount) > 0 ? `after ${money2(d.discount)} discount` : '' },
         ...(isInvoice
           ? [{ label: 'Received', value: money2(d.paid_amount || 0), sub: `${pays.length} payment${pays.length === 1 ? '' : 's'}` },
             { label: 'Balance due', value: money2(balance), sub: credit > 0 ? `Overpaid by ${money2(credit)} — refund or adjust` : st === 'paid' ? 'Settled' : d.due_date ? `Due ${fmtDate(d.due_date)}` : '', tone: balance > 0 && st === 'overdue' ? 'bad' as const : undefined }]
@@ -244,7 +253,6 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
                 <h2 style={{ fontSize: 17 }}>{s.company_name}</h2>
                 <div className="muted pre small" style={{ marginTop: 3 }}>{s.company_address}</div>
                 <div className="muted small">{[s.company_email, s.company_phone].filter(Boolean).join(' · ')}</div>
-                {s.gstin ? <div className="small" style={{ marginTop: 2 }}>GSTIN {s.gstin}{s.pan ? ` · PAN ${s.pan}` : ''}</div> : null}
               </div>
             </div>
             <div className="right"><h1>{title}</h1><div className="mono" style={{ marginTop: 4 }}>{String(d.number)}</div>{stamp}</div>
@@ -252,26 +260,24 @@ function DocumentView({ kind, d, onEdit }: { kind: Kind; d: Row; onEdit(): void 
           <div className="cols">
             <div>
               <div className="lbl">{isInvoice ? 'Billed to' : 'Prepared for'}</div>
-              {client ? <><div style={{ fontWeight: 600, fontSize: 14 }}>{String(client.company)}</div><div className="pre small muted">{[client.address, client.city, client.state].filter(Boolean).join(', ')}</div>{client.gstin ? <div className="small">GSTIN {String(client.gstin)}</div> : null}</>
+              {client ? <><div style={{ fontWeight: 600, fontSize: 14 }}>{String(client.company)}</div><div className="pre small muted">{[client.address, client.city, client.state].filter(Boolean).join(', ')}</div></>
                 : lead ? <><div style={{ fontWeight: 600, fontSize: 14 }}>{String(lead.company || lead.name)}</div><div className="small muted">Attn: {String(lead.name)}</div></> : '—'}
             </div>
             <div className="right small">
               <div className="lbl">Details</div>
               <div>Date: <b>{fmtDate(d.issue_date)}</b></div>
               {isInvoice ? <div>Due: <b>{fmtDate(d.due_date)}</b></div> : <div>Valid until: <b>{fmtDate(d.valid_until)}</b></div>}
-              {d.project_name ? <div>Project: <b>{String(d.project_name)}</b></div> : null}
+              {d.project_name ? <div>Project: <b><ProjectLink id={d.project_id} name={d.project_name} tab="finance" /></b></div> : null}
             </div>
           </div>
           {d.title ? <div style={{ marginTop: 28, fontWeight: 600, fontSize: 14 }}>{String(d.title)}</div> : null}
           <table>
-            <thead><tr><th style={{ width: 34 }}>#</th><th>Description</th><th>HSN/SAC</th><th className="num">Qty</th><th className="num">Rate</th><th className="num">Amount</th></tr></thead>
-            <tbody>{items.map((it, i) => <tr key={i}><td className="muted">{i + 1}</td><td className="pre">{it.description}</td><td className="muted">{it.hsn}</td><td className="num">{it.qty}</td><td className="num">{money2(it.rate)}</td><td className="num">{money2(Number(it.qty) * Number(it.rate))}</td></tr>)}</tbody>
+            <thead><tr><th style={{ width: 34 }}>#</th><th>Description</th><th className="num">Qty</th><th className="num">Rate</th><th className="num">Amount</th></tr></thead>
+            <tbody>{items.map((it, i) => <tr key={i}><td className="muted">{i + 1}</td><td className="pre">{it.description}</td><td className="num">{it.qty}</td><td className="num">{money2(it.rate)}</td><td className="num">{money2(Number(it.qty) * Number(it.rate))}</td></tr>)}</tbody>
           </table>
           <div className="totals">
             <div><span className="muted">Subtotal</span><span>{money2(d.subtotal)}</span></div>
             {Number(d.discount) > 0 && <div><span className="muted">Discount</span><span>− {money2(d.discount)}</span></div>}
-            {d.tax_type === 'cgst_sgst' && <><div><span className="muted">CGST @ {half}%</span><span>{money2(Number(d.tax_amount) / 2)}</span></div><div><span className="muted">SGST @ {half}%</span><span>{money2(Number(d.tax_amount) / 2)}</span></div></>}
-            {d.tax_type === 'igst' && <div><span className="muted">IGST @ {String(d.tax_rate)}%</span><span>{money2(d.tax_amount)}</span></div>}
             <div className="grand"><span>Total</span><span>{money2(d.total)}</span></div>
             {isInvoice && Number(d.paid_amount) > 0 && <><div><span className="muted">Paid</span><span>− {money2(d.paid_amount)}</span></div><div style={{ fontWeight: 650 }}><span>Balance due</span><span>{money2(balance)}</span></div></>}
           </div>

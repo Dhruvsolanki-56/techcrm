@@ -19,7 +19,7 @@ function Entry({ i, onEvent }: { i: Item; onEvent(id: number): void }) {
     <>
       <span className={`ev c-${i.type}`} style={{ margin: '3px 0 0', padding: 0 }} />
       <div className="grow"><div className="t" style={{ whiteSpace: 'normal' }}>{i.title}</div><div className="s">{i.sub}</div></div>
-      <span className="small muted nowrap">{fmtDate(i.date).replace(/ \d{4}$/, '')}</span>
+      <span className="small muted nowrap">{fmtDate(i.date)}</span>
     </>
   );
   return i.link
@@ -62,7 +62,7 @@ export default function Calendar() {
       <div className="pt">
         <div><h1>{first.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h1><div className="sub">Deadlines, due dates, renewals and follow-ups in one view.</div></div>
         <div className="legend">
-          <span className="c-project">Project deadline</span><span className="c-task">Task</span><span className="c-invoice">Invoice due</span><span className="c-renewal">Renewal / quote</span><span className="c-followup">Follow-up</span>
+          <span className="c-project">Project deadline</span><span className="c-task">Task</span><span className="c-invoice">Invoice due</span>{isFounder && <span className="c-milestone">Payment to invoice</span>}<span className="c-renewal">Renewal / quote</span><span className="c-followup">Follow-up</span>
           {isFounder && <><span className="c-grant">Grant report</span><span className="c-document">Document expiry</span></>}
         </div>
       </div>

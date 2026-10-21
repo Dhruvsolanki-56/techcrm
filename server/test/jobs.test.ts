@@ -17,11 +17,13 @@ const notifications = (email: string): { text: string; link: string }[] => {
 describe('daily reminders', () => {
   it('tell people about overdue tasks, renewals, invoices, follow-ups and waiting change requests — once a day', async () => {
     await d.F.post('/change_requests', { project_id: d.proj.acme, title: 'Old unanswered request', requested_on: ago(5) });
+    // something someone else pays is not debited by the company, so the founders are reminded about it
+    await d.F.post('/renewals', { name: 'Vansh ChatGPT', kind: 'subscription', scope: 'personal', owner_id: d.u.rohan, renewal_date: ago(2), cycle: 'monthly', our_cost: 2000 });
     runReminders(d.app.ctx);
     const kabir = notifications('kabir@demo.test');
     expect(kabir.some((n) => /Overdue task: Write UAT checklist/.test(n.text))).toBe(true);
     const aarav = notifications('aarav@demo.test');
-    expect(aarav.some((n) => /Renewal .*BrightPath shared hosting/.test(n.text))).toBe(true);
+    expect(aarav.some((n) => /Renewal .*Vansh ChatGPT/.test(n.text))).toBe(true);
     expect(aarav.some((n) => /Invoice overdue: INV\//.test(n.text))).toBe(true);
     expect(aarav.some((n) => /Change request waiting for an estimate: Old unanswered request/.test(n.text))).toBe(true);
     expect(notifications('isha@demo.test').some((n) => /Follow up with lead: Rajesh Kumar/.test(n.text))).toBe(true);

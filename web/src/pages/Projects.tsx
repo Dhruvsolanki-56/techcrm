@@ -7,7 +7,7 @@ import { DataTable, type Column } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
 import { Badge, Due, LogoSq, Priority, Who } from '../ui/primitives';
-import { Amount, editCol} from './common';
+import { Amount, editCol, LinkTo } from './common';
 
 export const pctDone = (p: Record<string, unknown>): number => (Number(p.task_count) ? Math.round((100 * Number(p.tasks_done)) / Number(p.task_count)) : 0);
 
@@ -19,7 +19,7 @@ export function ProjectsTable({ clientId }: { clientId?: number }) {
   const cols: Column[] = [
     {
       key: 'name', label: 'Project', sort: 'name',
-      render: (r) => <div className="who"><LogoSq name={r.name} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis">{String(r.name)}</div><div className="t2 ellipsis">{[r.code, clientId ? r.type : r.client_name].filter(Boolean).join(' · ')}</div></div></div>,
+      render: (r) => <div className="who"><LogoSq name={r.name} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis"><LinkTo to={`/projects/${String(r.id)}`}>{String(r.name)}</LinkTo></div><div className="t2 ellipsis">{[r.code, clientId ? r.type : ''].filter(Boolean).join(' · ')}{!clientId && r.client_id ? <>{r.code ? ' · ' : ''}<LinkTo to={`/clients/${String(r.client_id)}`}>{String(r.client_name)}</LinkTo></> : null}</div></div></div>,
     },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
     { key: 'priority', label: 'Priority', cls: 'opt', render: (r) => <Priority value={r.priority} /> },

@@ -31,7 +31,7 @@ export function LineChart({ series, labels, h = 200, fmt = compact, tipFmt = mon
   const L = 44; const R = 12; const T = 14; const B = 28;
   const n = labels.length;
   const geo = useMemo(() => {
-    const max = Math.max(1, ...series.flatMap((s) => s.values));
+    const max = Math.max(4, ...series.flatMap((s) => s.values));
     const raw = max / 4;
     const mag = 10 ** Math.floor(Math.log10(raw));
     const step = ([1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= raw) ?? mag * 10);
@@ -141,7 +141,7 @@ export function Funnel({ rows, valueFmt = compact }: { rows: FunnelRow[]; valueF
 /** Vertical grouped columns (e.g. leads added vs converted per month). */
 export function Columns({ labels, series, h = 180, fmt = (n: number) => String(Math.round(n)) }: { labels: string[]; series: { name: string; values: number[]; color: string }[]; h?: number; fmt?(n: number): string }) {
   const [ref, W] = useWidth<HTMLDivElement>();
-  const max = Math.max(1, ...series.flatMap((s) => s.values));
+  const max = Math.max(2, ...series.flatMap((s) => s.values));
   const L = 42; const B = 24; const T = 8;
   const w = Math.max(W, labels.length * 34 + L);
   const slot = (w - L) / labels.length;

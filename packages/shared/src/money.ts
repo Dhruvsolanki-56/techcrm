@@ -21,7 +21,6 @@ export function compact(n: unknown): string {
 
 export interface LineItem {
   description: string;
-  hsn?: string;
   qty: number;
   rate: number;
 }
@@ -33,13 +32,11 @@ export interface Totals {
   total: number;
 }
 
-export function computeTotals(items: LineItem[], discount: number, taxRate: number, taxType: string): Totals {
+/** An invoice or quotation total: the lines less the discount. (There is no GST in this company, so no tax is ever added.) */
+export function computeTotals(items: LineItem[], discount: number): Totals {
   const subtotal = round2(items.reduce((s, it) => s + it.qty * it.rate, 0));
   const disc = Math.min(Math.max(Number(discount) || 0, 0), subtotal);
-  const taxable = subtotal - disc;
-  const rate = taxType === 'none' ? 0 : Number(taxRate) || 0;
-  const tax = round2((taxable * rate) / 100);
-  return { subtotal, discount: round2(disc), tax_amount: tax, total: round2(taxable + tax) };
+  return { subtotal, discount: round2(disc), tax_amount: 0, total: round2(subtotal - disc) };
 }
 
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
@@ -57,4 +54,36 @@ export function inWords(amount: number): string {
   const rupees = Math.floor(total / 100);
   const paise = total % 100;
   return `Rupees ${words(rupees)}${paise ? ` and ${words(paise)} Paise` : ''} Only`;
+}
+
+/** TDS a client will deduct from a billed amount at a given rate. */
+export const tdsOf = (amount: number, percent: number): number => round2((Number(amount) * Number(percent || 0)) / 100);
+
+/**
+ * What to put on an invoice so it is only for money we will really receive: the amount less the TDS the client deducts.
+ * Every line is scaled by the same ratio (the last line takes the rounding), so the lines still add up to the net total.
+ */
+export function netOfTds<T extends { qty: number; rate: number }>(items: T[], percent: number): { items: T[]; gross: number; tds: number; net: number } {
+  const gross = round2(items.reduce((s, i) => s + i.qty * i.rate, 0));
+  const tds = tdsOf(gross, percent);
+  if (!(percent > 0) || !items.length) return { items, gross, tds: 0, net: gross };
+  const net = round2(gross - tds);
+  let left = net;
+  const out = items.map((it, i) => {
+    const last = i === items.length - 1;
+    const line = last ? left : round2((it.qty * it.rate * (1 - percent / 100)));
+    left = round2(left - line);
+    return { ...it, rate: it.qty ? round2(line / it.qty) : line };
+  });
+  return { items: out, gross, tds, net };
+}
+
+/** Splits an agreed value by percentages; the last part takes the rounding so the parts always add up to the value. */
+export function splitByPercent(value: number, percents: number[]): number[] {
+  let left = round2(value);
+  return percents.map((p, i) => {
+    const amount = i === percents.length - 1 ? left : round2((value * p) / 100);
+    left = round2(left - amount);
+    return amount;
+  });
 }

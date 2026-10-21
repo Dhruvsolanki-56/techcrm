@@ -2,13 +2,14 @@ import { TDS_STATUSES } from '@crm/shared';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { fmtDate, money } from '../lib/format';
+import { ClientLink, InvoiceLink, ProjectLink } from '../pages/common';
 import { useAct, useGet, useParam } from '../lib/hooks';
 import { ExportMenu } from '../ui/ExportMenu';
 import { useDialogs } from '../ui/Modal';
 import { ErrorBox, Kpis, Panel } from '../ui/primitives';
 
 interface Group { key: string; label: string; deducted: number; claimed: number; certificate: number; count: number; gross: number; to_claim: number; ay?: string; ended?: boolean }
-interface Entry { id: number; date: string; amount: number; tds: number; gross: number; rate: number; tds_status: string; tds_section: string | null; tds_claimed_on: string | null; client_name: string | null; project_name: string | null; invoice_number: string | null; fy: string }
+interface Entry { id: number; date: string; amount: number; tds: number; gross: number; rate: number; tds_status: string; tds_section: string | null; tds_claimed_on: string | null; client_id: number | null; client_name: string | null; project_id: number | null; project_name: string | null; invoice_id: number | null; invoice_number: string | null; fy: string }
 interface Report {
   fy: string | null; status: string | null;
   totals: { deducted: number; claimed: number; certificate: number; awaiting_certificate: number; to_claim: number; count: number };
@@ -85,10 +86,10 @@ export function TdsAnalytics() {
             <tbody>{d.entries.map((e) => (
               <tr key={e.id}>
                 <td className="nowrap">{fmtDate(e.date)}<div className="t2">FY {e.fy}</div></td>
-                <td><b>{e.client_name ?? '—'}</b><div className="t2">{[e.invoice_number, e.project_name, e.tds_section ? `Sec ${e.tds_section}` : ''].filter(Boolean).join(' · ')}</div></td>
+                <td><b><ClientLink id={e.client_id} name={e.client_name ?? '—'} tab="billing" /></b><div className="t2">{e.invoice_number ? <InvoiceLink id={e.invoice_id} number={e.invoice_number} /> : null}{e.invoice_number && e.project_name ? ' · ' : ''}{e.project_name ? <ProjectLink id={e.project_id} name={e.project_name} tab="finance" /> : null}{e.tds_section ? ` · Sec ${e.tds_section}` : ''}</div></td>
                 <td className="num">{money(e.amount)}</td><td className="num">{money(e.tds)}</td><td className={`num opt ${e.rate > 20 ? "neg" : ""}`} title={e.rate > 20 ? "Unusually high for TDS — check the amounts" : undefined}>{e.rate}%</td>
                 <td>
-                  <select aria-label={`TDS status for ${e.client_name ?? 'payment'} on ${e.date}`} value={e.tds_status} onChange={(ev) => set.mutate({ id: e.id, tds_status: ev.target.value })}>
+                  <select aria-label={`TDS status for ${e.client_name ?? 'payment'} on ${fmtDate(e.date)}`} value={e.tds_status} onChange={(ev) => set.mutate({ id: e.id, tds_status: ev.target.value })}>
                     {TDS_STATUSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                   </select>
                   {e.tds_claimed_on && <div className="t2">Claimed {fmtDate(e.tds_claimed_on)}</div>}

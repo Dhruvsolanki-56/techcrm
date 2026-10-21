@@ -14,7 +14,7 @@ import { Icon } from '../ui/Icon';
 import { DataTable } from '../ui/DataTable';
 import { Page, SectionH } from '../ui/Page';
 import { Avatar, Badge, Crumb, Empty, ErrorBox, ExtLink, Panel, Skeleton, Tabs, Who } from '../ui/primitives';
-import { RenewalsTable } from './Renewals';
+import { PlansTable, RenewalsTable } from './Renewals';
 import { ProjectsTable } from './Projects';
 
 export default function ClientDetail() {
@@ -59,7 +59,7 @@ export default function ClientDetail() {
             {isFounder && <Hl label="Received to date" value={money(c.lifetime_received)} />}
             {isFounder && <Hl label="Still to get" value={money(c.to_get)} sub={Number(c.to_get) > 0 ? (Number(c.outstanding) > 0 ? `${money(c.outstanding)} invoiced, unpaid` : 'Not invoiced yet') : 'All settled'} tone={Number(c.outstanding) > 0 ? 'bad' : ''} />}
             <Hl label="Projects" value={String(c.project_count)} sub={Number(c.active_projects) ? `${c.active_projects} active` : ''} />
-            <Hl label="Client since" value={fmtDate(c.created_at).replace(/ \d{4}$/, '')} sub={fmtDate(c.created_at).slice(-4)} />
+            <Hl label="Client since" value={fmtDate(c.created_at)} />
           </Highlights>
           <Tabs tabs={tabs} active={tabs.some((t) => t.key === tab) ? tab : 'projects'} onChange={setTab} />
           <div style={{ marginTop: 18 }}>
@@ -110,7 +110,8 @@ export default function ClientDetail() {
             {tab === 'care' && (
               <div className="stack">
                 <div><SectionH title="Work log" /><MaintenanceTable query={{ client_id: cid }} compact defaults={{ client_id: cid }} /></div>
-                {isFounder && <div><SectionH title="Maintenance plans, domains & hosting" /><RenewalsTable query={{ client_id: cid }} compact defaults={{ client_id: cid }} /></div>}
+                {isFounder && <div><SectionH title="Maintenance plans" /><PlansTable query={{ client_id: cid }} compact defaults={{ client_id: cid }} /></div>}
+                {isFounder && <div><SectionH title="Domains, hosting & subscriptions we pay for this client" /><RenewalsTable query={{ client_id: cid }} compact defaults={{ client_id: cid }} /></div>}
               </div>
             )}
           </div>
@@ -121,7 +122,6 @@ export default function ClientDetail() {
             <Prop label="Manager">{c.manager_name ? <Who name={c.manager_name} /> : null}</Prop>
             <Prop label="Industry">{c.industry ? String(c.industry) : null}</Prop>
             <Prop label="Website">{c.website ? <ExtLink url={c.website} /> : null}</Prop>
-            <Prop label="GSTIN">{c.gstin ? <span className="mono">{String(c.gstin)}</span> : null}</Prop>
             <Prop label="PAN">{c.pan ? <span className="mono">{String(c.pan)}</span> : null}</Prop>
             <Prop label="Address">{[c.address, c.city, c.state, c.country].filter(Boolean).join(', ') || null}</Prop>
             <Prop label="Tags">{c.tags ? String(c.tags) : null}</Prop>

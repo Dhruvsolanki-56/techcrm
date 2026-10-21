@@ -88,7 +88,7 @@ describe('system IDs', () => {
 
 describe('quote / invoice lines', () => {
   it('accepts clean lines and explains each mistake', () => {
-    expect(normalizeItems([{ description: 'Work', qty: 2, rate: 100 }])).toEqual([{ description: 'Work', hsn: '', qty: 2, rate: 100 }]);
+    expect(normalizeItems([{ description: 'Work', qty: 2, rate: 100 }])).toEqual([{ description: 'Work', qty: 2, rate: 100 }]);
     expect(normalizeItems('[{"description":"A","qty":1,"rate":5}]')).toHaveLength(1);
     expect(normalizeItems('not json')).toEqual([]);
     expect(() => normalizeItems([{ description: 'Work', qty: 0, rate: 1 }])).toThrow(/quantity/);

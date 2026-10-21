@@ -1,9 +1,9 @@
+import { fmtDateTime } from '../lib/format';
 import { useState } from 'react';
 import { api, qs, type Row } from '../lib/api';
 import { useGet, useAct } from '../lib/hooks';
 import { LoadFailed } from '../ui/primitives';
 import { useSession } from '../lib/session';
-import { ago } from '../shell/Bell';
 import { Icon } from '../ui/Icon';
 import { useDialogs } from '../ui/Modal';
 
@@ -43,7 +43,7 @@ export function Notes({ type, id, canWrite = true, kinds = true, placeholder }: 
             <div className="tl-ico"><Icon name={NOTE_ICON[String(n.kind)] ?? 'note'} /></div>
             <div style={{ minWidth: 0 }}>
               <div className="tl-meta">
-                {n.kind === 'system' ? null : <><b>{String(n.user_name ?? 'Someone')}</b> {NOTE_VERB[String(n.kind)] ?? ''} ·</>} <span>{ago(n.created_at)}</span>
+                {n.kind === 'system' ? null : <><b>{String(n.user_name ?? 'Someone')}</b> {NOTE_VERB[String(n.kind)] ?? ''} ·</>} <span>{fmtDateTime(n.created_at)}</span>
                 {n.kind !== 'system' && (isFounder || n.user_id === user.id) && (
                   <button type="button" className="btn ghost sm icon" title="Delete" aria-label="Delete note"
                     onClick={async () => { if (await dialogs.confirm('Delete this note?', { danger: true, okLabel: 'Delete' })) del.mutate(Number(n.id)); }}><Icon name="x" /></button>

@@ -4,11 +4,11 @@ export type Option = readonly [value: string, label: string];
 
 export const LEAD_STAGES = [
   ['new', 'New'], ['contacted', 'Contacted'], ['qualified', 'Qualified'], ['meeting', 'Demo/Meeting'], ['proposal', 'Proposal Sent'],
-  ['negotiation', 'Negotiation'], ['won', 'Converted'], ['closed', 'Closed'], ['lost', 'Lost'], ['nurture', 'Nurture'],
+  ['negotiation', 'Negotiation'], ['accepted', 'Accepted'], ['won', 'Converted'], ['closed', 'Closed'], ['lost', 'Lost'], ['nurture', 'Nurture'],
 ] as const satisfies readonly Option[];
 export const CLOSED_STAGES = ['won', 'closed', 'lost'] as const;
 /** How likely each stage is to close (the team's sheet guide) — drives the weighted pipeline. */
-export const STAGE_PROB: Record<string, number> = { new: 10, contacted: 20, qualified: 35, meeting: 50, proposal: 65, negotiation: 80, won: 100, closed: 0, lost: 0, nurture: 10 };
+export const STAGE_PROB: Record<string, number> = { new: 10, contacted: 20, qualified: 35, meeting: 50, proposal: 65, negotiation: 80, accepted: 90, won: 100, closed: 0, lost: 0, nurture: 10 };
 export const LEAD_PRIORITIES = [['hot', 'Hot'], ['medium', 'Medium'], ['cold', 'Cold']] as const satisfies readonly Option[];
 export const FOLLOWUP_ROUNDS = [
   ['not_started', 'Not Started'], ['initial', 'Initial Contact'], ['first', '1st Follow-Up'], ['second', '2nd Follow-Up'], ['third', '3rd Follow-Up'], ['complete', 'Follow-Up Complete'],
@@ -53,13 +53,12 @@ export const INVOICE_STATUSES = [
   ['draft', 'Draft'], ['sent', 'Sent'], ['partial', 'Partially paid'], ['paid', 'Paid'], ['overdue', 'Overdue'], ['cancelled', 'Cancelled'],
 ] as const satisfies readonly Option[];
 export const INVOICE_KINDS = ['invoice', 'proforma'] as const;
-export const TAX_TYPES = [['cgst_sgst', 'CGST + SGST (same state)'], ['igst', 'IGST (other state)'], ['none', 'No tax']] as const satisfies readonly Option[];
 
 export const GRANT_STATUSES = [['applied', 'Applied'], ['approved', 'Approved'], ['disbursed', 'Disbursed'], ['closed', 'Closed'], ['rejected', 'Rejected']] as const satisfies readonly Option[];
 export const ACCOUNT_TYPES = [['bank', 'Bank account'], ['upi', 'UPI / Wallet'], ['cash', 'Cash'], ['card', 'Credit card'], ['wallet', 'Wallet']] as const satisfies readonly Option[];
 export const TRANSFER_KINDS = [
   ['capital_in', 'Founder capital put in'], ['withdrawal', 'Founder withdrawal / salary'], ['reimbursement', 'Reimburse founder (paid personally)'],
-  ['tax_paid', 'Tax paid (GST / TDS / Income tax)'], ['transfer', 'Transfer between accounts'],
+  ['tax_paid', 'Income tax paid'], ['transfer', 'Transfer between accounts'],
 ] as const satisfies readonly Option[];
 export const MATCH_STATUSES = [['Unmatched', 'Unmatched'], ['Matched', 'Matched'], ['Ignored', 'Ignored']] as const satisfies readonly Option[];
 export const RENEWAL_KINDS = [

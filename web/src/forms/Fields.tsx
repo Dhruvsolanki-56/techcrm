@@ -1,3 +1,4 @@
+import { DateInput } from '../ui/DateInput';
 import { check, checkDates, kindFor, RULES, validDate } from '@crm/shared';
 import { useId } from 'react';
 import { useSession, type Lookups } from '../lib/session';
@@ -85,6 +86,8 @@ export function Field({ f, resource, value, error, onChange, options }: FieldPro
         {opts.map((o) => <option key={o.v} value={String(o.v)}>{o.l}</option>)}
       </select>
     );
+  } else if (f.type === 'date') {
+    input = <DateInput {...common} value={String(v)} onChange={(e) => onChange(e.target.value)} />;
   } else if (f.type === 'money' || f.type === 'number') {
     input = <input {...common} type="number" inputMode="decimal" step={f.type === 'money' ? '0.01' : 'any'} min={rule?.num ? rule.min : undefined} placeholder={f.placeholder} value={String(v)} onChange={(e) => onChange(e.target.value)} />;
   } else {
@@ -114,6 +117,7 @@ export function validate(resource: string, items: FormItem[], values: Values): E
   const errors: Errors = {};
   for (const it of items) {
     if (isSection(it) || it.type === 'checkbox' || it.type === 'people') continue;
+    if (it.showIf && !it.showIf.in.includes(String(values[it.showIf.field] ?? ''))) continue; // a hidden field is not asked for
     const v = values[it.name];
     const empty = v == null || String(v).trim() === '';
     if (it.required && empty) { errors[it.name] = `${it.label} is required.`; continue; }
@@ -134,7 +138,7 @@ export function FormGrid({ items, resource, values, errors, set, optionsFor }: {
 }) {
   return (
     <div className="form-grid">
-      {items.map((it, i) => (isSection(it)
+      {items.filter((it) => isSection(it) || !it.showIf || it.showIf.in.includes(String(values[it.showIf.field] ?? ''))).map((it, i) => (isSection(it)
         ? <div className="fsec" key={`s${i}`}><b>{it.section}</b>{it.hint && <span>{it.hint}</span>}</div>
         : <Field key={it.name} f={it} resource={resource} value={values[it.name]} error={errors[it.name]} onChange={(v) => set(it.name, v)} options={optionsFor?.(it.name)} />))}
     </div>

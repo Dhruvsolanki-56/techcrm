@@ -1,11 +1,12 @@
 import express, { type Request, type Response } from 'express';
-import { SCHEDULE_TEMPLATES, addDays, addMonths, CLOSED_STAGES, CYCLE_MONTHS, today, validDate, round2, values, FOLLOWUP_ROUNDS, LEAD_STAGES } from '@crm/shared';
+import { SCHEDULE_TEMPLATES, netOfTds, splitByPercent, addDays, addMonths, CLOSED_STAGES, CYCLE_MONTHS, today, validDate, round2, values, FOLLOWUP_ROUNDS, LEAD_STAGES } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import type { Engine } from '../crud/engine';
 import { projectCode } from '../domain/entities';
 import { linkInvoiceToChangeRequest, syncChangeRequestWithQuote } from '../domain/changeRequests';
 import { nextNumber } from '../domain/billing';
+import { acceptQuotation } from '../domain/flow';
 import { toPdf, toXlsx } from './exporters';
 import { badRequest, conflict, forbidden, HttpError, need, notFound } from '../shared/errors';
 import { founderOnly } from '../http/middleware';
@@ -96,25 +97,41 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
   router.post('/projects/:id/schedule', founderOnly, (req: Request, res: Response) => {
     const p = one('SELECT * FROM projects WHERE id=?', req.params.id);
     if (!p) throw notFound('Project not found');
-    const tpl = SCHEDULE_TEMPLATES[String((req.body ?? {}).template)];
-    need(tpl, 'Choose a payment schedule.');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    // either a ready-made template or your own percentages ("30, 30, 40"): the first is the advance, the last the final payment
+    let plan: { title: string; kind: string; percent: number }[];
+    let label: string;
+    if (Array.isArray(body.percents)) {
+      const pc = (body.percents as unknown[]).map((x) => Number(x));
+      need(pc.length >= 1 && pc.length <= 12 && pc.every((x) => Number.isFinite(x) && x > 0 && x <= 100), 'Each part must be a percentage between 0 and 100 (up to 12 parts).');
+      need(Math.abs(pc.reduce((a, x) => a + x, 0) - 100) < 0.01, `The parts add up to ${round2(pc.reduce((a, x) => a + x, 0))}%, they must add up to 100%.`);
+      plan = pc.map((percent, i) => ({ percent, kind: i === pc.length - 1 ? 'final' : i === 0 ? 'advance' : 'milestone', title: pc.length === 1 ? 'Full payment' : i === pc.length - 1 ? 'Final payment' : i === 0 ? 'Advance' : `Milestone ${i}` }));
+      label = pc.join(' / ') + ' %';
+    } else {
+      const tpl = SCHEDULE_TEMPLATES[String(body.template)];
+      need(tpl, 'Choose a payment schedule.');
+      plan = tpl.items.map(([title, kind, percent]) => ({ title, kind, percent }));
+      label = tpl.label;
+    }
     need(p.budget > 0, 'Set the agreed value of the project first.');
+    const tdsPct = body.tds_percent === undefined || body.tds_percent === null || body.tds_percent === '' ? null : Number(body.tds_percent);
+    need(tdsPct === null || (Number.isFinite(tdsPct) && tdsPct >= 0 && tdsPct <= 100), 'TDS must be between 0 and 100 %.');
     db.transaction(() => {
+      if (tdsPct !== null) db.prepare('UPDATE projects SET tds_percent=? WHERE id=?').run(tdsPct, p.id);
       // payments already invoiced are kept; the rest of the value is split over a fresh schedule
-      const kept = one('SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM milestones WHERE project_id=? AND invoice_id IS NOT NULL', p.id) as { s: number; n: number };
-      db.prepare('DELETE FROM milestones WHERE project_id=? AND invoice_id IS NULL').run(p.id);
-      let left = round2(Math.max(0, (p.budget as number) - kept.s));
-      const base = left;
-      tpl.items.forEach(([title, kind, percent], i) => {
-        const last = i === tpl.items.length - 1;
-        const amount = last ? left : round2((base * percent) / 100);
-        left = round2(left - amount);
+      const kept = one("SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM milestones WHERE project_id=? AND invoice_id IN (SELECT id FROM invoices WHERE status<>'cancelled')", p.id) as { s: number; n: number };
+      // a payment whose invoice was cancelled is open again, so it is replanned with the rest
+      db.prepare("DELETE FROM milestones WHERE project_id=? AND (invoice_id IS NULL OR invoice_id IN (SELECT id FROM invoices WHERE status='cancelled'))").run(p.id);
+      const base = round2(Math.max(0, (p.budget as number) - kept.s));
+      const parts = splitByPercent(base, plan.map((x) => x.percent));
+      plan.forEach((item, i) => {
+        const amount = parts[i] as number;
         if (amount <= 0) return;
-        const due = kind === 'advance' ? p.start_date || today() : last ? p.deadline || null : null;
-        db.prepare('INSERT INTO milestones(project_id,title,kind,percent,amount,due_date,position) VALUES(?,?,?,?,?,?,?)').run(p.id, title, kind, percent, amount, due, kept.n + i + 1);
+        const due = item.kind === 'advance' ? p.start_date || today() : i === plan.length - 1 ? p.deadline || null : null;
+        db.prepare('INSERT INTO milestones(project_id,title,kind,percent,amount,due_date,position) VALUES(?,?,?,?,?,?,?)').run(p.id, item.title, item.kind, item.percent, amount, due, kept.n + i + 1);
       });
     })();
-    ctx.audit(user(req), 'update', 'projects', p.id, `Payment schedule: ${tpl.label}`, req.ip);
+    ctx.audit(user(req), 'update', 'projects', p.id, `Payment schedule: ${label}${tdsPct ? ` · TDS ${tdsPct}%` : ''}`, req.ip);
     res.json(all('SELECT * FROM milestones WHERE project_id=? ORDER BY position', p.id));
   });
 
@@ -122,56 +139,68 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
   router.post('/milestones/:id/invoice', founderOnly, (req: Request, res: Response) => {
     const m = one('SELECT ms.*, p.client_id, p.name AS project_name FROM milestones ms JOIN projects p ON p.id=ms.project_id WHERE ms.id=?', req.params.id);
     if (!m) throw notFound('Payment not found');
-    need(!m.invoice_id, 'This payment has already been invoiced.');
+    need(!m.invoice_id || (one('SELECT status FROM invoices WHERE id=?', m.invoice_id)?.status === 'cancelled'), 'This payment has already been invoiced.');
     need(m.client_id, 'The project has no client yet.');
+    // TDS is optional and can differ per payment: a TDS % sent with the request (even 0) wins, then the payment's own, then the project's
+    const sent = (req.body ?? {}).tds_percent;
+    const given = sent === undefined || sent === null || sent === '' ? null : Number(sent);
+    need(given === null || (Number.isFinite(given) && given >= 0 && given <= 100), 'TDS must be between 0 and 100 %.');
+    const pct = given ?? (m.tds_percent as number | null) ?? ((one('SELECT tds_percent FROM projects WHERE id=?', m.project_id)?.tds_percent as number) || 0);
+    if (given !== null) db.prepare('UPDATE milestones SET tds_percent=? WHERE id=?').run(given, m.id);
+    // the invoice is for what we will receive: the share of the value less the TDS (if any) that the client deducts and tracks apart for the ITR
+    const split = netOfTds([{ description: `${m.project_name} — ${m.title}${m.percent ? ` (${m.percent}%)` : ''}`, qty: 1, rate: m.amount }], pct);
     const inv = engine.create('invoices', {
       user: user(req), ip: req.ip,
-      body: { client_id: m.client_id, project_id: m.project_id, title: `${m.project_name} — ${m.title}`, due_date: addDays(today(), 15), items: [{ description: `${m.project_name} — ${m.title}`, qty: 1, rate: m.amount }] },
+      body: { client_id: m.client_id, project_id: m.project_id, title: `${m.project_name} — ${m.title}`, due_date: addDays(today(), 15), items: split.items, expected_tds: split.tds,
+        notes: split.tds ? `This payment is ${round2(m.amount)} less ${pct}% TDS (${split.tds}) that you deduct and deposit with the tax department; the amount payable is ${split.net}.` : undefined },
     });
     db.prepare("UPDATE milestones SET invoice_id=?, reached_on=COALESCE(reached_on, ?), updated_at=datetime('now') WHERE id=?").run(inv.id, today(), m.id);
     res.status(201).json({ invoice_id: inv.id, number: inv.number });
   });
 
-  /* ---------- quotation → project (new work for a client who already exists) ---------- */
+  /* ---------- quotation → accepted: the lead, the client and the project follow in one step ---------- */
   router.post('/quotes/:id/start-project', founderOnly, (req: Request, res: Response) => {
     const q = one('SELECT * FROM quotes WHERE id=?', req.params.id);
     if (!q) throw notFound('Quote not found');
-    need(q.client_id, 'Link the quotation to a client first (convert the lead to a client).');
+    need(q.client_id || q.lead_id, 'Link the quotation to a client or a lead first.');
     need(!q.project_id, 'This quotation already has a project.');
     need(!q.change_request_id, 'A quotation for a change request belongs to its project.');
+    need(!['rejected', 'expired'].includes(q.status), `A ${q.status} quotation cannot start a project. Set it back to Sent or Accepted first if the client changed their mind.`);
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const u = user(req);
-    const out = db.transaction(() => {
-      const value = round2(q.subtotal - q.discount);
-      const pid = Number(db.prepare("INSERT INTO projects(client_id,name,status,budget,manager_id,start_date,description) VALUES(?,?,'planning',?,?,?,?)")
-        .run(q.client_id, str(b.project_name) || q.title || `Project ${q.number}`, value, u.id, today(), q.notes ?? null).lastInsertRowid);
-      db.prepare('UPDATE projects SET code=? WHERE id=?').run(projectCode(pid), pid);
-      db.prepare('INSERT OR IGNORE INTO project_members(project_id,user_id) VALUES(?,?)').run(pid, u.id);
-      db.prepare("UPDATE quotes SET project_id=?, status='accepted', updated_at=datetime('now') WHERE id=?").run(pid, q.id);
-      if (q.lead_id) db.prepare("UPDATE leads SET stage='won', closed_on=COALESCE(closed_on, ?), client_id=COALESCE(client_id, ?), next_followup=NULL WHERE id=?").run(today(), q.client_id, q.lead_id);
-      db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('project',?,?,'system',?)").run(pid, u.id, `Started from accepted quotation ${q.number} (₹${value.toLocaleString('en-IN')})`);
-      return pid;
-    })();
-    ctx.audit(u, 'convert', 'quotes', q.id, `${q.number} → project #${out}`, req.ip);
-    res.status(201).json({ project_id: out });
+    const out = acceptQuotation(ctx, q.id, user(req).id, { startProject: true, projectName: str(b.project_name) || undefined });
+    ctx.audit(user(req), 'convert', 'quotes', q.id, `${q.number} → project #${out.project_id}`, req.ip);
+    res.status(201).json({ project_id: out.project_id, client_id: out.client_id });
   });
 
   /* ---------- quotation → invoice ---------- */
   router.post('/quotes/:id/to-invoice', founderOnly, (req: Request, res: Response) => {
-    const q = one('SELECT * FROM quotes WHERE id=?', req.params.id);
+    let q = one('SELECT * FROM quotes WHERE id=?', req.params.id);
     if (!q) throw notFound('Quote not found');
-    need(q.client_id, 'Link this quotation to a client first (convert the lead to a client).');
+    need(q.client_id || q.lead_id, 'Link this quotation to a client or a lead first.');
+    need(!['rejected', 'expired'].includes(q.status), `A ${q.status} quotation cannot be invoiced. Set it back to Sent or Accepted first if the client changed their mind.`);
+    // invoicing an accepted quotation of a lead makes the lead's client (and moves the lead), without making a project
+    if (!q.client_id && !q.change_request_id) { acceptQuotation(ctx, q.id, user(req).id, { startProject: false }); q = one('SELECT * FROM quotes WHERE id=?', q.id) as Row; }
+    // one quotation, one invoice: a second click (or a second tab) returns the invoice that already exists instead of making a duplicate
+    const already = one("SELECT id FROM invoices WHERE quote_id=? AND status<>'cancelled' ORDER BY id LIMIT 1", q.id);
+    if (already) { res.json({ invoice_id: already.id, existing: true }); return; }
     const s = ctx.settings.get();
     const issue = today();
     const due = new Date();
     due.setDate(due.getDate() + 15);
+    // a project whose client deducts TDS is invoiced for what we will receive; the same ratio applies to every payment (change requests included)
+    const pct = q.project_id ? ((one('SELECT tds_percent FROM projects WHERE id=?', q.project_id)?.tds_percent as number) || 0) : 0;
+    const split = pct > 0 ? netOfTds(JSON.parse(q.items || '[]') as { qty: number; rate: number }[], pct) : null;
+    const items = split ? JSON.stringify(split.items) : q.items;
+    const subtotal = split ? round2(split.net) : q.subtotal;
+    const total = split ? round2(split.net - q.discount) : q.total;
     const id = db.transaction(() => {
-      const invoiceId = Number(db.prepare(`INSERT INTO invoices(number,client_id,project_id,quote_id,change_request_id,title,issue_date,due_date,status,items,subtotal,discount,tax_type,tax_rate,tax_amount,total,currency,terms,notes,created_by)
-        VALUES(?,?,?,?,?,?,?,?,'draft',?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(nextNumber(ctx, 'invoices', s.invoice_prefix, issue), q.client_id, q.project_id, q.id, q.change_request_id, q.title, issue, due.toISOString().slice(0, 10), q.items, q.subtotal, q.discount,
-          q.tax_type, q.tax_rate, q.tax_amount, q.total, q.currency, s.terms_invoice, q.notes, user(req).id).lastInsertRowid);
-      db.prepare("UPDATE quotes SET status='accepted', updated_at=datetime('now') WHERE id=?").run(q.id);
-      syncChangeRequestWithQuote(ctx, { ...q, status: 'accepted' }, q.status, user(req).id);
+      const invoiceId = Number(db.prepare(`INSERT INTO invoices(number,client_id,project_id,quote_id,change_request_id,title,issue_date,due_date,status,items,subtotal,discount,tax_type,tax_rate,tax_amount,total,currency,terms,notes,created_by,expected_tds)
+        VALUES(?,?,?,?,?,?,?,?,'draft',?,?,?,'none',0,0,?,?,?,?,?,?)`)
+        .run(nextNumber(ctx, 'invoices', s.invoice_prefix, issue), q.client_id, q.project_id, q.id, q.change_request_id, q.title, issue, due.toISOString().slice(0, 10), items, subtotal, q.discount,
+          total, q.currency, s.terms_invoice, split && split.tds ? `${q.notes ? `${q.notes}
+` : ''}Quoted ${round2(split.gross)} less ${pct}% TDS (${split.tds}) that you deduct; the amount payable is ${split.net}.` : q.notes, user(req).id, split ? split.tds : 0).lastInsertRowid);
+      if (q.change_request_id) { db.prepare("UPDATE quotes SET status='accepted', updated_at=datetime('now') WHERE id=?").run(q.id); syncChangeRequestWithQuote(ctx, { ...q, status: 'accepted' }, q.status, user(req).id); }
+      else acceptQuotation(ctx, q.id, user(req).id, { startProject: false });
       linkInvoiceToChangeRequest(ctx, one('SELECT * FROM invoices WHERE id=?', invoiceId) as Row, user(req).id);
       return invoiceId;
     })();
@@ -189,7 +218,7 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
     const open = one("SELECT number FROM quotes WHERE change_request_id=? AND status IN ('draft','sent','accepted')", cr.id);
     if (open) throw conflict(`Quotation ${open.number} already exists for this change request. Edit it, or reject / delete it first.`);
     need(cr.client_id, 'The project has no client yet.');
-    const item = { description: `${cr.title}${cr.estimate_hours > 0 ? ` (about ${cr.estimate_hours} hours)` : ''}`, hsn: '', qty: 1, rate: cr.estimate_amount };
+    const item = { description: `${cr.title}${cr.estimate_hours > 0 ? ` (about ${cr.estimate_hours} hours)` : ''}`, qty: 1, rate: cr.estimate_amount };
     const quote = engine.create('quotes', {
       user: user(req), ip: req.ip,
       body: { client_id: cr.client_id, project_id: cr.project_id, change_request_id: cr.id, title: `Change request ${`CR-${String(cr.id).padStart(4, '0')}`}: ${cr.title}`, items: [item],
@@ -229,7 +258,7 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
     const from = `FROM notes n JOIN leads l ON l.id=n.entity_id LEFT JOIN users u ON u.id=n.user_id WHERE ${where.join(' AND ')}`;
     return {
       total: (one(`SELECT COUNT(*) n ${from}`, ...p) as { n: number }).n,
-      rows: all(`SELECT n.id, date(n.created_at) AS contact_date, n.entity_id AS lead_id, COALESCE(l.company, l.name) AS company, n.kind, n.followup_round, n.body, n.next_followup,
+      rows: all(`SELECT n.id, date(n.created_at) AS contact_date, n.entity_id AS lead_id, COALESCE(l.company, l.name) AS company, l.name AS person, l.stage AS lead_stage, l.phone AS lead_phone, n.kind, n.followup_round, n.body, n.next_followup,
         u.name AS user_name ${from} ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?`, ...p, limit, offset),
     };
   }
@@ -241,7 +270,7 @@ export function flowRoutes(ctx: AppContext, engine: Engine): express.Router {
   for (const fmt of ['xlsx', 'pdf'] as const) {
     router.get(`/contact-log/export.${fmt}`, async (req: Request, res: Response) => {
       const rows = contactLog(req, true).rows.map((r) => ({ ...r, outcome: r.body, body: undefined })) as Row[];
-      const out = fmt === 'xlsx' ? await toXlsx('Contact log', rows) : await toPdf('Contact log', 'contact_log', rows);
+      const out = fmt === 'xlsx' ? await toXlsx('Contact log', rows, undefined, 'contact_log', user(req).name) : await toPdf('Contact log', 'contact_log', rows, undefined, user(req).name);
       res.setHeader('Content-Type', fmt === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="contact-log-${today()}.${fmt}"`);
       res.send(out);

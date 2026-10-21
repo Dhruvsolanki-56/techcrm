@@ -1,3 +1,4 @@
+import { LinkTo, ProjectLink } from './common';
 import { PRIORITIES, TASK_STATUSES } from '@crm/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -17,12 +18,12 @@ import { AvatarStack, Badge, Due, Priority, Seg, Who } from '../ui/primitives';
 const TASK_TONE: Record<string, string> = { todo: 'var(--faint)', in_progress: 'var(--blue)', review: '#d99312', done: 'var(--green)' };
 interface Person { id: number; name: string }
 
-export function TaskCard({ t }: { t: Row }) {
+export function TaskCard({ t, here }: { t: Row; here?: boolean }) {
   const assignees = (t.assignees as Person[] | undefined) ?? [];
   return (
     <>
       <div className="t">{String(t.title)}</div>
-      <div className="s"><span className="tkey">{taskKey(t.id)}</span> {String(t.project_name ?? 'No project')}</div>
+      <div className="s"><span className="tkey">{taskKey(t.id)}</span> {t.project_id ? (here ? String(t.project_name) : <ProjectLink id={t.project_id} name={t.project_name} tab="tasks" />) : 'No project'}</div>
       <div className="f">
         <Priority value={t.priority} />
         {Number(t.check_total) > 0 && <span className={`meta-i ${t.check_done === t.check_total ? 'ok' : ''}`} title={`Checklist: ${t.check_done} of ${t.check_total} done`}><Icon name="check" />{String(t.check_done)}/{String(t.check_total)}</span>}
@@ -43,7 +44,7 @@ export function TaskBoard({ query, onOpen }: { query: Record<string, unknown>; o
   const doneAll = tasks.filter((t) => t.status === 'done');
   const shown = [...tasks.filter((t) => t.status !== 'done'), ...doneAll.slice(-20)];
   return (
-    <Kanban cols={TASK_STATUSES.map(([v, l]) => ({ v, l, c: TASK_TONE[v] }))} items={shown} group={(t) => String(t.status)} card={(t) => <TaskCard t={t} />}
+    <Kanban cols={TASK_STATUSES.map(([v, l]) => ({ v, l, c: TASK_TONE[v] }))} items={shown} group={(t) => String(t.status)} card={(t) => <TaskCard t={t} here={Boolean(query.project_id)} />}
       head={(list, c) => (c.v === 'done' && doneAll.length > list.length ? `latest ${list.length}` : '')} onOpen={(t) => onOpen(t.id)} onMove={(t, status) => move.mutate({ id: t.id, status })} />
   );
 }
@@ -52,7 +53,7 @@ export default function Tasks() {
   const { isFounder, user, lookups } = useSession();
   const editor = useEditor();
   const [sp, setSp] = useSearchParams();
-  const [view, setView] = useParam('view', (() => { try { return localStorage.getItem('taskView') || 'board'; } catch { return 'board'; } })());
+  const [view, setView] = useParam('view', 'list');
   const scope = sp.get('scope') ?? 'mine';
   const assignee = sp.get('assignee') ?? '';
   const project = sp.get('project') ?? '';
@@ -70,7 +71,7 @@ export default function Tasks() {
   const set = (k: string, v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); if (k === 'assignee' && v) n.set('scope', 'all'); return n; }, { replace: true });
 
   const cols: Column[] = [
-    { key: 'title', label: 'Task', sort: 'title', render: (r) => <><div className="t1">{String(r.title)}</div><div className="t2">{taskKey(r.id)} · {String(r.project_name ?? 'No project')}{Number(r.check_total) ? ` · ${r.check_done}/${r.check_total} steps` : ''}{Number(r.comment_count) ? ` · ${r.comment_count} comments` : ''}</div></> },
+    { key: 'title', label: 'Task', sort: 'title', render: (r) => <><div className="t1">{String(r.title)}</div><div className="t2">{taskKey(r.id)} · {r.project_id ? <LinkTo to={`/projects/${String(r.project_id)}?tab=tasks`}>{String(r.project_name)}</LinkTo> : 'No project'}{Number(r.check_total) ? ` · ${r.check_done}/${r.check_total} steps` : ''}{Number(r.comment_count) ? ` · ${r.comment_count} comments` : ''}</div></> },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
     { key: 'priority', label: 'Priority', sort: 'priority', render: (r) => <Priority value={r.priority} /> },
     { key: 'people', label: 'People', render: (r) => { const a = (r.assignees as Person[] | undefined) ?? []; return a.length > 1 ? <span className="who"><AvatarStack names={a.map((x) => x.name)} /><span className="ellipsis">{a.map((x) => x.name.split(' ')[0]).join(', ')}</span></span> : <Who name={r.assignee_name} />; } },
@@ -80,7 +81,7 @@ export default function Tasks() {
   return (
     <Page title="My work" crumbs={<b>{scope === 'mine' && !assignee ? 'My work' : 'Tasks'}</b>}
       actions={<>
-        <Seg value={view as 'board' | 'list'} onChange={(v) => { setView(v); try { localStorage.setItem('taskView', v); } catch { /* private mode */ } }} options={[['board', 'Board'], ['list', 'List']]} />
+        <Seg value={view as 'board' | 'list'} onChange={setView} options={[['list', 'List'], ['board', 'Board']]} />
         <button type="button" className="btn primary" onClick={() => editor.open({ resource: 'tasks', defaults: { assignee_id: user.id, project_id: project } })}><Icon name="plus" />New task</button>
       </>}>
       <div className="toolbar">

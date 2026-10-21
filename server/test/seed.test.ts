@@ -140,14 +140,17 @@ describe.skipIf(!have)('TechSentinals seed', () => {
   });
 
   describe('recurring costs', () => {
-    it('has two Claude subscriptions, ChatGPT and the variable Airtel bill — all debiting themselves', async () => {
+    it('has two Claude subscriptions and the Airtel bill (company pays, debited automatically) and Vansh’s ChatGPT (only listed)', async () => {
       const ren = (await get('/renewals?limit=500')).filter((r: { kind: string }) => r.kind !== 'amc');
       expect(ren.map((r: { name: string }) => r.name).sort()).toEqual(['Airtel postpaid phone bill', 'ChatGPT Plus', 'Claude subscription (billed on the 12th)', 'Claude subscription (billed on the 17th)']);
-      expect(ren.every((r: { auto_debit: number; pay_account_id: number }) => r.auto_debit === 1 && r.pay_account_id)).toBe(true);
-      expect(ren.find((r: { name: string }) => /Airtel/.test(r.name))).toMatchObject({ amount_varies: 1, kind: 'bill', vendor: 'Airtel' });
+      const company = ren.filter((r: { scope: string }) => r.scope === 'company');
+      expect(company.map((r: { name: string }) => r.name).sort()).toEqual(['Airtel postpaid phone bill', 'Claude subscription (billed on the 12th)', 'Claude subscription (billed on the 17th)']);
+      expect(company.every((r: { auto_debit: number; pay_account_id: number }) => r.auto_debit === 1 && r.pay_account_id)).toBe(true);
+      expect(ren.find((r: { name: string }) => /ChatGPT/.test(r.name))).toMatchObject({ scope: 'personal', auto_debit: 0 });
+      expect(ren.find((r: { name: string }) => /Airtel/.test(r.name))).toMatchObject({ kind: 'bill', vendor: 'Airtel' });
       expect(ren.filter((r: { name: string }) => /^Claude/.test(r.name))).toHaveLength(2);
     });
-    it('debits Claude on the 17th once, and records an estimate for Airtel', async () => {
+    it('debits Claude on the 17th once, and the usual Airtel amount for the month (edited later if the bill differs)', async () => {
       const ctx = app.ctx;
       const claude = ctx.db.prepare("SELECT * FROM renewals WHERE name LIKE 'Claude%17th%'").get() as { id: number; renewal_date: string; pay_account_id: number };
       const due = runAutoDebits(ctx, claude.renewal_date);
@@ -158,7 +161,7 @@ describe.skipIf(!have)('TechSentinals seed', () => {
       const airtelLater = addDays(localToday(), 40);
       const est = runAutoDebits(ctx, airtelLater).filter((x) => /Airtel/.test(x.renewal));
       expect(est.length).toBeGreaterThanOrEqual(1);
-      expect(est[0]).toMatchObject({ estimate: true, amount: 834 });
+      expect(est[0]).toMatchObject({ estimate: false, amount: 834 });
     });
   });
 

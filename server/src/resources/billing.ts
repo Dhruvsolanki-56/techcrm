@@ -1,14 +1,15 @@
 import {
-  MILESTONE_KINDS, ACCOUNT_TYPES, CYCLES, GRANT_STATUSES, INVOICE_KINDS, INVOICE_STATUSES, MATCH_STATUSES, QUOTE_STATUSES, RENEWAL_KINDS, RENEWAL_STATUSES, TAX_TYPES, TRANSFER_KINDS, values,
+  MILESTONE_KINDS, ACCOUNT_TYPES, CYCLES, GRANT_STATUSES, INVOICE_KINDS, INVOICE_STATUSES, MATCH_STATUSES, QUOTE_STATUSES, RENEWAL_KINDS, RENEWAL_STATUSES, TRANSFER_KINDS, values,
 } from '@crm/shared';
 import { defineResource } from '../crud/define';
 import { refSql } from '../crud/refs';
 import { ALL, NONE, type ResourceDef } from '../crud/types';
-import { today, TDS_STATUSES } from '@crm/shared';
+import { today, TDS_STATUSES, round2 } from '@crm/shared';
 import type { Row } from '../db/connection';
 import { HttpError } from '../shared/errors';
 import { isFounder } from '../security/permissions';
 import { founderScope } from '../domain/access';
+import { acceptQuotation, paymentReceived } from '../domain/flow';
 import { documentBefore, markOverdue, refreshInvoice } from '../domain/billing';
 import { linkInvoiceToChangeRequest, syncChangeRequestWithQuote } from '../domain/changeRequests';
 import { purgeEntity } from '../domain/entities';
@@ -38,9 +39,9 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     label: (r) => r.number,
     fields: {
       number: 't', client_id: 'i', lead_id: 'i', project_id: 'i', change_request_id: 'i', title: 't', issue_date: 'd', valid_until: 'd', status: 't', items: 'j',
-      discount: 'n', tax_type: 't', tax_rate: 'n', currency: 't', terms: 't', notes: 't',
+      discount: 'n', currency: 't', terms: 't', notes: 't',
     },
-    required: ['title'], notNull: ['status'], enums: { status: values(QUOTE_STATUSES), tax_type: values(TAX_TYPES) },
+    required: ['title'], notNull: ['status'], enums: { status: values(QUOTE_STATUSES) },
     columns: `q.*, c.company AS client_name, l.name AS lead_name, p.name AS project_name, cr.title AS change_request_title`,
     from: `FROM quotes q LEFT JOIN clients c ON c.id=q.client_id LEFT JOIN leads l ON l.id=q.lead_id LEFT JOIN projects p ON p.id=q.project_id LEFT JOIN change_requests cr ON cr.id=q.change_request_id`,
     search: ['q.number', 'q.title', 'c.company', 'l.name', 'l.company', 'p.name'],
@@ -55,6 +56,8 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     },
     after(op, row, ex, { user }) {
       syncChangeRequestWithQuote(ctx, row, ex ? ex.status : null, user.id);
+      // accepting a quotation moves everything else with it (lead, client, project): nothing is entered twice
+      if (row.status === 'accepted' && ex?.status !== 'accepted' && !row.change_request_id) acceptQuotation(ctx, row.id, user.id);
       // sending a proposal to a lead moves the lead to "Proposal Sent"
       if (row.lead_id && row.status === 'sent' && ex?.status !== 'sent') {
         db.prepare("UPDATE leads SET stage='proposal', proposal_date=COALESCE(proposal_date, ?), updated_at=datetime('now') WHERE id=? AND stage IN ('new','contacted','qualified','meeting')").run(today(), row.lead_id);
@@ -62,6 +65,10 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
       if (op === 'create' && row.change_request_id) {
         db.prepare("UPDATE change_requests SET quote_id=?, status=CASE WHEN status IN ('requested','estimated') THEN 'quoted' ELSE status END, updated_at=datetime('now') WHERE id=?").run(row.id, row.change_request_id);
       }
+    },
+    beforeDelete(id) {
+      const live = one("SELECT number FROM invoices WHERE quote_id=? AND status<>'cancelled' LIMIT 1", id);
+      if (live) throw new HttpError(409, `Invoice ${String(live.number)} was made from this quotation, so it cannot be deleted. Cancel that invoice first, or keep the quotation.`);
     },
     onDelete: (id, row) => {
       if (row.change_request_id) db.prepare("UPDATE change_requests SET quote_id=NULL, status=CASE WHEN status='quoted' THEN 'estimated' ELSE status END WHERE quote_id=?").run(id);
@@ -74,13 +81,13 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     label: (r) => r.number,
     fields: {
       number: 't', kind: 't', client_id: 'i', project_id: 'i', change_request_id: 'i', title: 't', issue_date: 'd', due_date: 'd', status: 't', items: 'j',
-      discount: 'n', tax_type: 't', tax_rate: 'n', currency: 't', terms: 't', notes: 't',
+      discount: 'n', currency: 't', terms: 't', notes: 't', expected_tds: 'n',
     },
-    required: ['client_id'], notNull: ['status', 'kind'], enums: { status: values(INVOICE_STATUSES), kind: [...INVOICE_KINDS], tax_type: values(TAX_TYPES) },
+    required: ['client_id'], notNull: ['status', 'kind'], enums: { status: values(INVOICE_STATUSES), kind: [...INVOICE_KINDS] },
     columns: `i.*, MAX(i.total - i.paid_amount, 0) AS balance, MAX(i.paid_amount - i.total, 0) AS credit, c.company AS client_name, p.name AS project_name, q.number AS quote_number, cr.title AS change_request_title`,
     from: `FROM invoices i LEFT JOIN clients c ON c.id=i.client_id LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN quotes q ON q.id=i.quote_id LEFT JOIN change_requests cr ON cr.id=i.change_request_id`,
     search: ['i.number', 'i.title', 'c.company', 'p.name', 'q.number'],
-    filters: { client_id: 'i.client_id', project_id: 'i.project_id', status: 'i.status', kind: 'i.kind', change_request_id: 'i.change_request_id' },
+    filters: { client_id: 'i.client_id', project_id: 'i.project_id', quote_id: 'i.quote_id', status: 'i.status', kind: 'i.kind', change_request_id: 'i.change_request_id' },
     dateField: 'i.issue_date',
     sortable: { number: 'i.number', issue_date: 'i.issue_date', due_date: "COALESCE(i.due_date,'9999')", total: 'i.total', balance: 'balance', status: 'i.status', client_name: 'c.company COLLATE NOCASE' },
     order: 'i.issue_date DESC, i.id DESC',
@@ -88,6 +95,19 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     before(op, d, ex, actor) {
       documentBefore(ctx, 'invoices', 'invoice_prefix', 'terms_invoice')(op, d, ex, actor);
       checkChangeRequest(d, ex);
+      const clientId = 'client_id' in d ? d.client_id : ex?.client_id;
+      const projectId = 'project_id' in d ? d.project_id : ex?.project_id;
+      if (clientId && projectId) {
+        const pj = one('SELECT client_id FROM projects WHERE id=?', projectId);
+        if (!pj) throw new HttpError(400, 'That project does not exist any more. Refresh and choose again.');
+        if (pj.client_id !== clientId) throw new HttpError(400, 'That project belongs to a different client. Pick the client the project is for, or a project of this client.');
+      }
+      if (op === 'create') {
+        // never two live invoices for the same quotation or change request (a double click, a second tab, or "convert" and "new" both used)
+        const dupe = d.quote_id ? one("SELECT number FROM invoices WHERE quote_id=? AND status<>'cancelled' LIMIT 1", d.quote_id)
+          : d.change_request_id ? one("SELECT number FROM invoices WHERE change_request_id=? AND status<>'cancelled' LIMIT 1", d.change_request_id) : undefined;
+        if (dupe) throw new HttpError(409, `Invoice ${String(dupe.number)} already exists for this. Open it, or cancel it first if you really need another.`);
+      }
     },
     after(op, row, _ex, { user }) {
       refreshInvoice(ctx, row.id);
@@ -118,17 +138,27 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     sortable: { date: 'pm.date', amount: 'pm.amount', client_name: 'c.company COLLATE NOCASE', category: 'pm.category' },
     order: 'pm.date DESC, pm.id DESC',
     scope: founderScope, can: (u) => isFounder(u),
-    before(op, d, ex, { user }) {
+    before(op, d, ex, { user, body }) {
       if (op === 'create') d.created_by = user.id;
       const invId = d.invoice_id !== undefined ? d.invoice_id : ex?.invoice_id;
       if (invId) {
-        const inv = one('SELECT client_id, project_id FROM invoices WHERE id=?', invId);
-        if (inv) {
-          d.client_id = inv.client_id;
-          if (!d.project_id) d.project_id = inv.project_id;
-        }
+        const inv = one('SELECT client_id, project_id, status FROM invoices WHERE id=?', invId);
+        if (!inv) throw new HttpError(400, 'That invoice does not exist any more. Refresh and choose again.');
+        if (inv.status === 'cancelled' && (op === 'create' || d.invoice_id !== undefined)) throw new HttpError(400, 'That invoice is cancelled, so no payment can be recorded against it. Reopen the invoice first if it was cancelled by mistake.');
+        // a payment against an invoice is for that invoice's client and project
+        d.client_id = inv.client_id;
+        if (inv.project_id) d.project_id = inv.project_id;
+        else if (!d.project_id) d.project_id = null;
       }
       if (d.amount !== undefined && !(d.amount > 0)) throw new HttpError(400, 'Amount must be greater than zero.');
+      // a payment against an invoice that expects TDS follows the invoice's ratio unless a TDS amount is typed in (even 0)
+      if (op === 'create' && (body.tds === undefined || body.tds === null || body.tds === '') && invId && d.amount > 0) {
+        const inv = one('SELECT total, expected_tds FROM invoices WHERE id=?', invId);
+        if (inv && inv.expected_tds > 0 && inv.total > 0) {
+          const doneTds = (one('SELECT COALESCE(SUM(tds),0) s FROM payments WHERE invoice_id=?', invId)?.s as number) ?? 0;
+          d.tds = Math.max(0, Math.min(round2((inv.expected_tds * d.amount) / inv.total), round2(inv.expected_tds - doneTds)));
+        }
+      }
       if (d.tds !== undefined && d.tds < 0) throw new HttpError(400, 'TDS cannot be negative.');
       if (d.tds_status !== undefined && !TDS_STATUSES.some(([k]) => k === d.tds_status)) d.tds_status = 'deducted';
       if (d.tds_status === 'claimed' && !d.tds_claimed_on && !ex?.tds_claimed_on) d.tds_claimed_on = today();
@@ -136,6 +166,7 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     },
     after(_op, row, ex) {
       refreshInvoice(ctx, row.invoice_id);
+      paymentReceived(ctx, row.client_id); // the first payment makes a prospect a client and converts its waiting lead
       if (ex && ex.invoice_id !== row.invoice_id) refreshInvoice(ctx, ex.invoice_id);
     },
     onDelete: (_id, row) => refreshInvoice(ctx, row.invoice_id),
@@ -145,7 +176,7 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     table: 'expenses', alias: 'e',
     label: (r) => `${r.category || 'Expense'} ₹${r.amount}`,
     fields: {
-      date: 'd', category: 't', vendor: 't', description: 't', amount: 'n', tax_amount: 'n', project_id: 'i', client_id: 'i', account_id: 'i', paid_by_id: 'i', method: 't',
+      date: 'd', category: 't', vendor: 't', description: 't', amount: 'n', project_id: 'i', client_id: 'i', account_id: 'i', paid_by_id: 'i', method: 't',
       reference: 't', status: 't', notes: 't', grant_id: 'i', receipt_url: 't', is_estimate: 'b',
     },
     required: ['date', 'amount'], notNull: ['status'], enums: { status: ['paid', 'pending'] },
@@ -160,7 +191,7 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     scope: founderScope, can: (u) => isFounder(u),
     before(op, d, ex, { user }) {
       if (op === 'create') d.created_by = user.id;
-      nonNegative(d, ['amount', 'tax_amount'], 'Amounts cannot be negative.');
+      nonNegative(d, ['amount'], 'Amounts cannot be negative.');
       if (d.receipt_url && !/^https?:\/\//i.test(d.receipt_url)) d.receipt_url = `https://${d.receipt_url}`;
       // an estimated bill (a postpaid phone bill) is confirmed by entering the real amount or marking it paid
       if (ex?.is_estimate && !('is_estimate' in d) && ((('amount' in d) && d.amount !== ex.amount) || d.status === 'paid')) d.is_estimate = 0;
@@ -223,6 +254,10 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     before(_op, d) {
       nonNegative(d, ['requested', 'received'], 'Amounts cannot be negative.');
     },
+    beforeDelete(id) {
+      const n = (one('SELECT (SELECT COUNT(*) FROM expenses WHERE grant_id=?) + (SELECT COUNT(*) FROM payments WHERE grant_id=?) n', id, id) as { n: number }).n;
+      if (n) throw new HttpError(409, `${n} expense${n === 1 ? '' : 's'} or payment${n === 1 ? ' is' : 's are'} recorded against this grant, so it cannot be deleted. Mark it Closed instead.`);
+    },
   });
 
   const assets = defineResource({
@@ -276,14 +311,22 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
       ROUND(r.our_cost * 12.0 / CASE r.cycle WHEN 'monthly' THEN 1 WHEN 'quarterly' THEN 3 WHEN 'half-yearly' THEN 6 WHEN 'yearly' THEN 12 WHEN 'biennial' THEN 24 WHEN 'triennial' THEN 36 ELSE NULL END, 2) AS annual_cost`,
     from: `FROM renewals r LEFT JOIN clients c ON c.id=r.client_id LEFT JOIN projects p ON p.id=r.project_id LEFT JOIN users o ON o.id=r.owner_id LEFT JOIN accounts pa ON pa.id=r.pay_account_id`,
     search: ['r.name', 'r.vendor', 'r.category', 'r.notes', 'c.company', 'p.name', refSql('renewals', 'r')],
-    filters: { client_id: 'r.client_id', project_id: 'r.project_id', kind: 'r.kind', status: 'r.status', owner_id: 'r.owner_id', auto_debit: 'r.auto_debit', scope: 'r.scope' },
+    filters: { group: (v) => ({ sql: v === 'sell' ? "r.kind='amc'" : "r.kind<>'amc'", params: [] }), client_id: 'r.client_id', project_id: 'r.project_id', kind: 'r.kind', status: 'r.status', owner_id: 'r.owner_id', auto_debit: 'r.auto_debit', scope: 'r.scope' },
     sortable: { name: 'r.name COLLATE NOCASE', renewal_date: "COALESCE(r.renewal_date,'9999')", our_cost: 'r.our_cost', kind: 'r.kind', status: 'r.status' },
     order: "COALESCE(r.renewal_date,'9999')",
     scope: founderScope, can: (u) => isFounder(u),
-    before(_op, d) {
+    before(_op, d, ex) {
       if (d.owner_id) d.assigned_name = null;
-      // an empty "amount for the next cycle" means "use the normal cost", not zero
-      if ('next_amount' in d && !(d.next_amount > 0)) d.next_amount = null;
+      // Simple rule, no switches: what the company pays is debited as an expense on its date; what someone else pays is only listed.
+      // (An amount that differs one month is corrected on that month's expense, not on the subscription.)
+      const kind = (d.kind ?? ex?.kind) as string;
+      const scope = (d.scope ?? ex?.scope ?? 'company') as string;
+      const cost = (d.our_cost ?? ex?.our_cost ?? 0) as number;
+      d.auto_debit = scope === 'company' && kind !== 'amc' && cost > 0 ? 1 : 0;
+      d.amount_varies = 0;
+      d.next_amount = null;
+      if (kind === 'amc') d.scope = 'company';
+      if (scope === 'company') d.owner_id = null;
     },
     after(_op, row) {
       if (row.auto_debit) runAutoDebits(ctx);
@@ -303,7 +346,7 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
   const milestones = defineResource({
     table: 'milestones', alias: 'ms', timestamps: true,
     label: (r) => `${r.title}${r.project_name ? ` (${r.project_name})` : ''}`,
-    fields: { project_id: 'i', title: 't', kind: 't', percent: 'n', amount: 'n', due_date: 'd', reached_on: 'd', position: 'i', notes: 't' },
+    fields: { project_id: 'i', title: 't', kind: 't', percent: 'n', tds_percent: 'n', amount: 'n', due_date: 'd', reached_on: 'd', position: 'i', notes: 't' },
     required: ['title', 'project_id'], notNull: ['kind'], enums: { kind: values(MILESTONE_KINDS) },
     columns: `ms.*, p.name AS project_name, p.code AS project_code, p.client_id AS client_id, c.company AS client_name, p.budget AS project_value,
       i.number AS invoice_number, i.status AS invoice_status, i.total AS invoice_total, i.paid_amount AS invoice_paid, (${MS_STATE}) AS state`,
@@ -313,7 +356,14 @@ export function billingResources({ ctx }: ResourceDeps): Record<string, Resource
     sortable: { title: 'ms.title COLLATE NOCASE', due_date: "COALESCE(ms.due_date,'9999')", amount: 'ms.amount', position: 'ms.position' },
     order: 'ms.project_id, ms.position, ms.id',
     scope: founderScope, can: (u) => isFounder(u),
-    before(op, d, ex) {
+    beforeDelete(_id, row) {
+      const live = row.invoice_id ? one("SELECT number FROM invoices WHERE id=? AND status<>'cancelled'", row.invoice_id) : undefined;
+      if (live) throw new HttpError(409, `Invoice ${String(live.number)} was raised for this payment. Cancel that invoice first.`);
+    },
+    before(op, d, ex, { body }) {
+      // an empty TDS box means "use the project's TDS", while 0 means "no TDS on this payment"
+      if ('tds_percent' in body && (body.tds_percent === '' || body.tds_percent === null)) d.tds_percent = null;
+      if (d.tds_percent !== undefined && d.tds_percent !== null && (d.tds_percent < 0 || d.tds_percent > 100)) throw new HttpError(400, 'TDS must be between 0 and 100 %.');
       const projectId = 'project_id' in d ? d.project_id : ex?.project_id;
       const project = projectId ? one('SELECT id, budget FROM projects WHERE id=?', projectId) : undefined;
       if (!project) throw new HttpError(400, 'Choose the project this payment belongs to.');

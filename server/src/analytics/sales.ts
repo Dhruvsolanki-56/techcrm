@@ -56,7 +56,7 @@ export function salesAnalytics(ctx: AppContext, engine: Engine, user: User, quer
 
   // how long a deal takes from first entry to conversion (only leads with both dates)
   const cycles = leads.filter((l) => l.stage === 'won' && l.closed_on).map((l) => (new Date(l.closed_on).getTime() - new Date(String(l.created_at).slice(0, 10)).getTime()) / 86_400_000).filter((d) => d >= 0);
-  const stageOrder = ['new', 'contacted', 'qualified', 'meeting', 'proposal', 'negotiation', 'won'];
+  const stageOrder = ['new', 'contacted', 'qualified', 'meeting', 'proposal', 'negotiation', 'accepted', 'won'];
   const funnel = stageOrder.map((s) => {
     const arr = leads.filter((l) => l.stage === s);
     return { stage: s, count: arr.length, value: sum(arr, (l) => l.value) };

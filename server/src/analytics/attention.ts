@@ -1,8 +1,8 @@
-import { addDays, assessmentYear, fyOf, fyRange, today } from '@crm/shared';
+import { addDays, assessmentYear, dmy, fyOf, fyRange, today } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import { markOverdue } from '../domain/billing';
-import { PM_SQL } from '../domain/projectMoney';
+import { ADVANCE_SQL, ADVANCE_STATE_SQL, PM_SQL } from '../domain/projectMoney';
 import { hasFlag, isFounder, type User } from '../security/permissions';
 
 export type Severity = 'critical' | 'high' | 'normal';
@@ -71,7 +71,7 @@ export function attention(ctx: AppContext, u: User): AttentionResult {
     const overdue = one(`SELECT COUNT(*) n FROM leads l WHERE ${open} AND l.next_followup<?${scope}`, t, ...sp).n as number;
     if (due) add({ key: 'leads-due', severity: overdue ? 'high' : 'normal', area: 'Sales', title: `${plural(due, 'follow-up')} due${overdue ? ` (${overdue} overdue)` : ' today'}`, detail: 'People waiting for your call or message', link: '/followups?show=due', count: due });
     const hot = all(`SELECT l.id, l.name, l.company, l.last_contact FROM leads l WHERE ${open} AND l.priority='hot' AND COALESCE(l.last_contact, date(l.created_at)) < ?${scope} ORDER BY COALESCE(l.last_contact, date(l.created_at)) LIMIT 12`, addDays(t, -7), ...sp);
-    if (hot.length) add({ key: 'leads-hot-quiet', severity: 'high', area: 'Sales', title: `${plural(hot.length, 'hot lead')} not contacted for over a week`, detail: 'Hot leads go cold fast — call or message them', link: '/leads?priority=hot', count: hot.length, children: hot.map((r) => ({ title: String(r.company || r.name), detail: r.last_contact ? `Last contact ${r.last_contact}` : 'Never contacted', link: `/leads/${r.id}` })) });
+    if (hot.length) add({ key: 'leads-hot-quiet', severity: 'high', area: 'Sales', title: `${plural(hot.length, 'hot lead')} not contacted for over a week`, detail: 'Hot leads go cold fast — call or message them', link: '/leads?priority=hot', count: hot.length, children: hot.map((r) => ({ title: String(r.company || r.name), detail: r.last_contact ? `Last contact ${dmy(r.last_contact)}` : 'Never contacted', link: `/leads/${r.id}` })) });
     const uncontacted = one(`SELECT COUNT(*) n FROM leads l WHERE l.stage='new' AND l.last_contact IS NULL AND date(l.created_at)<?${scope}`, addDays(t, -2), ...sp).n as number;
     if (uncontacted) add({ key: 'leads-uncontacted', severity: uncontacted > 20 ? 'high' : 'normal', area: 'Sales', title: `${plural(uncontacted, 'new lead')} never contacted`, detail: 'Reach out, or close the ones that are not real', link: '/leads?view=list&stage=new', count: uncontacted });
     const nodate = one(`SELECT COUNT(*) n FROM leads l WHERE ${open} AND l.next_followup IS NULL AND l.stage<>'nurture'${scope}`, ...sp).n as number;
@@ -85,7 +85,7 @@ export function attention(ctx: AppContext, u: User): AttentionResult {
     const sc = founder ? '' : ' AND ml.assignee_id=?';
     const sp = founder ? [] : [u.id];
     for (const r of all(`SELECT ml.id, ml.title, ml.priority, ml.reported_on, p.name project FROM maintenance_logs ml LEFT JOIN projects p ON p.id=ml.project_id WHERE ml.status<>'resolved' AND (ml.priority IN ('high','urgent') OR ml.reported_on<?)${sc} ORDER BY ml.reported_on LIMIT 6`, addDays(t, -3), ...sp)) {
-      add({ key: `maint-${r.id}`, severity: ['urgent', 'high'].includes(r.priority) ? 'critical' : 'high', area: 'Support', title: `Support item open: ${r.title}`, detail: `${r.project ?? 'No project'} · reported ${r.reported_on ?? 'earlier'}`, link: '/maintenance', date: r.reported_on });
+      add({ key: `maint-${r.id}`, severity: ['urgent', 'high'].includes(r.priority) ? 'critical' : 'high', area: 'Support', title: `Support item open: ${r.title}`, detail: `${r.project ?? 'No project'} · reported ${r.reported_on ? dmy(r.reported_on) : 'earlier'}`, link: '/maintenance', date: r.reported_on });
     }
   }
 
@@ -134,11 +134,11 @@ export function attention(ctx: AppContext, u: User): AttentionResult {
   }
   for (const r of all("SELECT cr.id, cr.title, cr.status, cr.requested_on, p.name project, p.id pid FROM change_requests cr JOIN projects p ON p.id=cr.project_id WHERE cr.status IN ('requested','estimated') ORDER BY cr.requested_on LIMIT 6")) {
     const late = r.requested_on && r.requested_on < addDays(t, -3);
-    add({ key: `cr-wait-${r.id}`, severity: late ? 'high' : 'normal', area: 'Delivery', title: `Change request waiting for ${r.status === 'requested' ? 'an estimate' : 'a quotation'}: ${r.title}`, detail: `${r.project}${r.requested_on ? ` · asked ${r.requested_on}` : ''}`, link: `/projects/${r.pid}?tab=changes`, date: r.requested_on });
+    add({ key: `cr-wait-${r.id}`, severity: late ? 'high' : 'normal', area: 'Delivery', title: `Change request waiting for ${r.status === 'requested' ? 'an estimate' : 'a quotation'}: ${r.title}`, detail: `${r.project}${r.requested_on ? ` · asked ${dmy(r.requested_on)}` : ''}`, link: `/projects/${r.pid}?tab=changes`, date: r.requested_on });
   }
   // money still to get: what is agreed and not invoiced yet (TDS excluded — that is claimed in the ITR). Projects with a payment ready to invoice are already listed above.
   const readyProjects = new Set(items.filter((i) => i.key.startsWith('ms-')).map((i) => Number(i.link.match(/projects\/(\d+)/)?.[1])));
-  for (const r of all(`SELECT p.id, p.name, p.status, c.company, MAX(0, ${PM_SQL.value} - ${PM_SQL.tds} - ${PM_SQL.invoiced}) to_invoice
+  for (const r of all(`SELECT p.id, p.name, p.status, c.company, MAX(0, ${PM_SQL.value} - ${PM_SQL.tds_eff} - ${PM_SQL.invoiced}) to_invoice
     FROM projects p LEFT JOIN clients c ON c.id=p.client_id WHERE p.status NOT IN ('cancelled','planning') ORDER BY p.id`)) {
     if (r.to_invoice < 1 || readyProjects.has(r.id)) continue;
     const finished = ['completed', 'maintenance'].includes(r.status);
@@ -146,6 +146,19 @@ export function attention(ctx: AppContext, u: User): AttentionResult {
   }
   for (const r of all("SELECT p.id, p.name, c.company FROM projects p LEFT JOIN clients c ON c.id=p.client_id WHERE p.status IN ('active','review','completed','maintenance') AND (p.budget IS NULL OR p.budget=0) LIMIT 5")) {
     add({ key: `proj-novalue-${r.id}`, severity: 'normal', area: 'Money', title: `No agreed value on ${r.name}`, detail: `${r.company ?? ''} — set it so billing and profit can be tracked`, link: `/projects/${r.id}` });
+  }
+
+  // an accepted quotation needs its payment plan, then its first payment
+  for (const r of all("SELECT p.id, p.name, p.budget, c.company FROM projects p LEFT JOIN clients c ON c.id=p.client_id WHERE p.status IN ('planning','active','review') AND p.budget>0 AND NOT EXISTS (SELECT 1 FROM milestones m WHERE m.project_id=p.id) LIMIT 8")) {
+    add({ key: `plan-${r.id}`, severity: 'high', area: 'Money', title: `Plan the payments for ${r.name}`, detail: `${r.company ?? ''} · ${inr(r.budget)} — advance, milestones and TDS, so invoices follow the plan`, link: `/projects/${r.id}?tab=finance&plan=1`, amount: r.budget, panel: false });
+  }
+  for (const r of all("SELECT l.id, COALESCE(NULLIF(l.company,''), l.name) who, l.updated_at FROM leads l WHERE l.stage='accepted' ORDER BY l.updated_at LIMIT 8")) {
+    add({ key: `lead-await-${r.id}`, severity: 'high', area: 'Sales', title: `Accepted, waiting for the first payment: ${r.who}`, detail: 'Collect the advance — the lead becomes a client when it arrives', link: `/leads/${r.id}` });
+  }
+  // work must not start before the advance is paid
+  for (const r of all(`SELECT p.id, p.name, c.company, ${ADVANCE_SQL} adv, p.tds_percent FROM projects p LEFT JOIN clients c ON c.id=p.client_id
+    WHERE p.status IN ('active','review') AND p.advance_required=1 AND ${ADVANCE_STATE_SQL}='unpaid'`)) {
+    add({ key: `adv-unpaid-${r.id}`, severity: 'high', area: 'Money', title: `Work has started but the advance is not paid: ${r.name}`, detail: `${r.company ?? ''} · advance ${inr(r.adv - (r.adv * (r.tds_percent || 0)) / 100)} to receive — collect it before more work is done`, link: `/projects/${r.id}?tab=finance`, amount: r.adv - (r.adv * (r.tds_percent || 0)) / 100 });
   }
 
   /* ---------- delivery ---------- */

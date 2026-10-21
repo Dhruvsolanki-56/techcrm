@@ -84,9 +84,15 @@ export default function ProjectDetail() {
       <Record
         main={<>
           <RecHead name={String(p.name)} refId={p.ref ?? p.code} meta={<><Badge value={p.status} />{p.client_id ? <Link to={`/clients/${p.client_id}`}>{String(p.client_name ?? '')}</Link> : null}<Meta><span className="mono">{String(p.code ?? '')}</span></Meta></>} />
+          {isFounder && p.advance_state === 'unpaid' && p.advance_required && ['active', 'review'].includes(String(p.status)) && (
+            <div className="callout err" role="alert" style={{ marginBottom: 14 }}>Work is under way, but the advance of {money(p.advance_amount)} has not been paid. <Link to={`/projects/${String(p.id)}?tab=finance`}>Open the payment schedule</Link></div>
+          )}
+          {isFounder && Number(p.budget) > 0 && !Number(p.milestone_count) && !['completed', 'cancelled'].includes(String(p.status)) && (
+            <div className="callout info" style={{ marginBottom: 14 }}>No payment plan yet. Decide how {money(p.budget)} is paid (advance, milestones, final) and whether the client deducts TDS — invoices then follow it. <Link to={`/projects/${String(p.id)}?tab=finance&plan=1`}>Plan the payments</Link></div>
+          )}
           <Highlights>
             <Hl label="Progress" value={`${pctDone(p)}%`} sub={`${p.tasks_done} of ${p.task_count} tasks done`} />
-            <Hl label="Deadline" value={p.deadline ? fmtDate(p.deadline).replace(/ \d{4}$/, '') : '—'}
+            <Hl label="Deadline" value={p.deadline ? fmtDate(p.deadline) : '—'}
               sub={days === null || closed ? (p.completed_on ? `Completed ${fmtDate(p.completed_on)}` : '') : days < 0 ? <span className="neg">{-days} days late</span> : `${days} days left`}
               tone={!closed && days !== null && days < 0 && !['maintenance', 'on_hold'].includes(String(p.status)) ? 'bad' : ''} />
             {isFounder && <Hl label="Project value" value={p.budget || p.cr_value ? money(p.revised_value) : '—'} sub={Number(p.cr_value) ? `${money(p.budget)} + ${money(p.cr_value)} change requests` : ''} />}

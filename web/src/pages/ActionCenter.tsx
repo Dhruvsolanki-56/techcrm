@@ -1,3 +1,4 @@
+import { LinkTo } from './common';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AREA_HELP, AttentionRow, useAttention, type AttentionItem } from '../components/Attention';
@@ -44,7 +45,7 @@ export default function ActionCenter() {
               <thead><tr><th>Client and project</th><th>What is left</th><th className="num">Still to get</th></tr></thead>
               <tbody>{owing.map((p) => (
                 <tr key={`${p.id}-${p.client_id}`} className="click" onClick={() => nav(p.id ? `/projects/${p.id}?tab=finance` : `/clients/${p.client_id}?tab=billing`)}>
-                  <td><b>{p.client_name ?? p.name}</b><div className="t2">{p.name} {p.id ? <Badge value={p.status} /> : null}</div></td>
+                  <td><b>{p.client_id ? <LinkTo to={`/clients/${p.client_id}?tab=billing`}>{p.client_name ?? p.name}</LinkTo> : (p.client_name ?? p.name)}</b><div className="t2">{p.id ? <LinkTo to={`/projects/${p.id}?tab=finance`}>{p.name}</LinkTo> : p.name} {p.id ? <Badge value={p.status} /> : null}</div></td>
                   <td>
                     {p.overdue > 0 && <div className="neg">{money(p.overdue)} overdue</div>}
                     {p.pending - p.overdue > 0.5 && <div>{money(p.pending - p.overdue)} invoiced, waiting for payment</div>}

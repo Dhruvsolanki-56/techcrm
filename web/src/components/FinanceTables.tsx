@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useEditor } from '../forms/RecordEditor';
 import { fmtDate } from '../lib/format';
 import { useSession, settingList } from '../lib/session';
-import { Amount, Cell2, editCol } from '../pages/common';
+import { Amount, Cell2, editCol, LinkTo } from '../pages/common';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Badge, Due, TextStatus, Who } from '../ui/primitives';
@@ -14,8 +14,8 @@ export function InvoicesTable({ query, projectId, clientId, compact }: { query?:
   if (clientId) newQuery.set('client', String(clientId));
   if (projectId) newQuery.set('project', String(projectId));
   const cols: Column[] = [
-    { key: 'number', label: 'Invoice', sort: 'number', render: (r) => <Cell2 top={<b>{String(r.number)}</b>} sub={String(r.title ?? '')} /> },
-    ...(compact ? [] : [{ key: 'client_name', label: 'Client', sort: 'client_name', render: (r: Record<string, unknown>) => <Cell2 top={String(r.client_name ?? '—')} sub={String(r.project_name ?? '')} /> } as Column]),
+    { key: 'number', label: 'Invoice', sort: 'number', render: (r) => <Cell2 top={<LinkTo to={`/invoices/${String(r.id)}`}><b>{String(r.number)}</b></LinkTo>} sub={String(r.title ?? '')} /> },
+    ...(compact ? [] : [{ key: 'client_name', label: 'Client', sort: 'client_name', render: (r: Record<string, unknown>) => <Cell2 top={r.client_id ? <LinkTo to={`/clients/${String(r.client_id)}`}>{String(r.client_name ?? '—')}</LinkTo> : String(r.client_name ?? '—')} sub={r.project_id ? <LinkTo to={`/projects/${String(r.project_id)}?tab=finance`}>{String(r.project_name ?? '')}</LinkTo> : String(r.project_name ?? '')} /> } as Column]),
     { key: 'kind', label: 'Type', cls: 'opt', render: (r) => (r.change_request_id ? <span className="tag plum">Change request</span> : r.kind === 'proforma' ? <span className="tag">Proforma</span> : <span className="faint">—</span>) },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
     { key: 'issue_date', label: 'Issued', cls: 'nowrap opt', sort: 'issue_date', render: (r) => fmtDate(r.issue_date) },
@@ -34,8 +34,8 @@ export function InvoicesTable({ query, projectId, clientId, compact }: { query?:
 export function QuotesTable({ query, compact, noAdd }: { query?: Record<string, unknown>; compact?: boolean; noAdd?: boolean }) {
   const nav = useNavigate();
   const cols: Column[] = [
-    { key: 'number', label: 'Quotation', sort: 'number', render: (r) => <Cell2 top={<b>{String(r.number)}</b>} sub={String(r.title ?? '')} /> },
-    { key: 'client_name', label: 'For', sort: 'client_name', render: (r) => <Cell2 top={String(r.client_name ?? r.lead_name ?? '—')} sub={String(r.project_name ?? '')} /> },
+    { key: 'number', label: 'Quotation', sort: 'number', render: (r) => <Cell2 top={<LinkTo to={`/quotes/${String(r.id)}`}><b>{String(r.number)}</b></LinkTo>} sub={String(r.title ?? '')} /> },
+    { key: 'client_name', label: 'For', sort: 'client_name', render: (r) => <Cell2 top={r.client_id ? <LinkTo to={`/clients/${String(r.client_id)}`}>{String(r.client_name)}</LinkTo> : r.lead_id ? <LinkTo to={`/leads/${String(r.lead_id)}`}>{String(r.lead_name ?? '—')}</LinkTo> : '—'} sub={r.project_id ? <LinkTo to={`/projects/${String(r.project_id)}?tab=finance`}>{String(r.project_name ?? '')}</LinkTo> : ''} /> },
     { key: 'cr', label: 'Type', cls: 'opt', render: (r) => (r.change_request_id ? <span className="tag plum">Change request</span> : <span className="faint">—</span>) },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
     { key: 'issue_date', label: 'Issued', cls: 'nowrap opt', sort: 'issue_date', render: (r) => fmtDate(r.issue_date) },
@@ -55,7 +55,7 @@ export function PaymentsTable({ query, compact, defaults }: { query?: Record<str
   const { lookups } = useSession();
   const cols: Column[] = [
     { key: 'date', label: 'Date', cls: 'nowrap', sort: 'date', render: (r) => fmtDate(r.date) },
-    { key: 'client_name', label: 'Client', sort: 'client_name', render: (r) => <Cell2 top={String(r.client_name ?? r.grant_name ?? '—')} sub={[r.invoice_number, r.project_name].filter(Boolean).join(' · ')} /> },
+    { key: 'client_name', label: 'Client', sort: 'client_name', render: (r) => <Cell2 top={r.client_id ? <LinkTo to={`/clients/${String(r.client_id)}`}>{String(r.client_name)}</LinkTo> : String(r.client_name ?? r.grant_name ?? '—')} sub={<>{r.invoice_id ? <LinkTo to={`/invoices/${String(r.invoice_id)}`}>{String(r.invoice_number)}</LinkTo> : null}{r.invoice_id && r.project_id ? ' · ' : ''}{r.project_id ? <LinkTo to={`/projects/${String(r.project_id)}?tab=finance`}>{String(r.project_name)}</LinkTo> : null}</>} /> },
     ...(compact ? [] : [
       { key: 'category', label: 'Category', cls: 'opt', sort: 'category', render: (r: Record<string, unknown>) => <span className="tag">{String(r.category ?? '—')}</span> } as Column,
       { key: 'method', label: 'Mode', cls: 'opt', render: (r: Record<string, unknown>) => <Cell2 top={String(r.method ?? '—')} sub={String(r.account_name ?? '')} /> } as Column,
@@ -76,7 +76,7 @@ export function ExpensesTable({ query, compact, defaults }: { query?: Record<str
   const { lookups } = useSession();
   const cols: Column[] = [
     { key: 'date', label: 'Date', cls: 'nowrap', sort: 'date', render: (r) => fmtDate(r.date) },
-    { key: 'vendor', label: 'Expense', sort: 'vendor', render: (r) => <Cell2 top={<>{String(r.vendor ?? r.description ?? '—')}{r.is_estimate ? <span className="tag amber" style={{ marginLeft: 6 }} title="Estimated from the last bill — edit it when the real bill arrives">Estimate</span> : null}</>} sub={[r.description && r.vendor ? r.description : '', r.renewal_name ? `Auto-debit: ${r.renewal_name}` : '', r.project_name].filter(Boolean).join(' · ')} /> },
+    { key: 'vendor', label: 'Expense', sort: 'vendor', render: (r) => <Cell2 top={<>{String(r.vendor ?? r.description ?? '—')}{r.is_estimate ? <span className="tag amber" style={{ marginLeft: 6 }} title="Estimated from the last bill — edit it when the real bill arrives">Estimate</span> : null}</>} sub={<>{[r.description && r.vendor ? r.description : ''].filter(Boolean).join('')}{r.renewal_id ? <> · <LinkTo to="/renewals">Auto-debit: {String(r.renewal_name)}</LinkTo></> : null}{r.project_id ? <> · <LinkTo to={`/projects/${String(r.project_id)}?tab=finance`}>{String(r.project_name)}</LinkTo></> : null}{r.grant_id ? <> · <LinkTo to={`/grants/${String(r.grant_id)}`}>{String(r.grant_name ?? 'Grant')}</LinkTo></> : null}</>} /> },
     { key: 'category', label: 'Category', cls: 'opt', sort: 'category', render: (r) => <span className="tag">{String(r.category ?? '—')}</span> },
     { key: 'paid', label: 'Paid by', cls: 'opt', render: (r) => (r.paid_by_name ? <Who name={r.paid_by_name} sub="personally" /> : <span className="muted">{String(r.account_name ?? 'Company')}</span>) },
     { key: 'status', label: 'Status', cls: 'opt', sort: 'status', render: (r) => <TextStatus value={r.status === 'paid' ? 'Completed' : 'Pending'} /> },
@@ -94,7 +94,7 @@ export function ExpensesTable({ query, compact, defaults }: { query?: Record<str
 export function MaintenanceTable({ query, compact, defaults }: { query?: Record<string, unknown>; compact?: boolean; defaults?: Record<string, unknown> }) {
   const editor = useEditor();
   const cols: Column[] = [
-    { key: 'title', label: 'Issue / work', sort: 'title', render: (r) => <Cell2 top={String(r.title)} sub={[r.type, compact ? '' : r.project_name ?? r.client_name].filter(Boolean).join(' · ')} /> },
+    { key: 'title', label: 'Issue / work', sort: 'title', render: (r) => <Cell2 top={String(r.title)} sub={<>{r.type ? `${String(r.type)} · ` : ''}{compact ? null : r.project_id ? <LinkTo to={`/projects/${String(r.project_id)}`}>{String(r.project_name)}</LinkTo> : r.client_id ? <LinkTo to={`/clients/${String(r.client_id)}`}>{String(r.client_name)}</LinkTo> : null}</>} /> },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
     { key: 'priority', label: 'Priority', cls: 'opt', sort: 'priority', render: (r) => <Badge value={r.priority} /> },
     { key: 'assignee_name', label: 'Assigned', cls: 'opt', render: (r) => <Who name={r.assignee_name} /> },

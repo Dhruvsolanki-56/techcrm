@@ -3,21 +3,21 @@ import { Link } from 'react-router-dom';
 import { ExpensesTable, PaymentsTable } from '../components/FinanceTables';
 import { useEditor } from '../forms/RecordEditor';
 import { api, type Row } from '../lib/api';
-import { fmtDate, fmtMonth, money } from '../lib/format';
+import { fmtDate, fmtMonth, money, plural } from '../lib/format';
 import { useAct, useGet, useParam } from '../lib/hooks';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Donut, HBars, Legend, LineChart, PALETTE } from '../ui/charts';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
 import { Badge, ErrorBox, Kpis, Panel, Tabs, Who } from '../ui/primitives';
-import { AddBtn, Amount, Cell2, editCol} from './common';
+import { AddBtn, Amount, Cell2, ClientLink, editCol} from './common';
 
 interface Summary {
   tds?: { deducted: number; claimed: number; to_claim: number; awaiting_certificate: number };
   still_to_get?: { to_get: number; pending: number; amount: number; overdue: number };
-  from: string; to: string; income: { cash: number; tds: number; n: number }; expenses: { v: number; tax: number; n: number }; invoiced: { taxable: number; total: number; tax: number; n: number };
+  from: string; to: string; income: { cash: number; tds: number; n: number }; expenses: { v: number; n: number }; invoiced: { total: number; n: number };
   profit: number; receivables: number; aging: Record<string, number>; trend: { month: string; income: number; expense: number }[]; expense_by_category: { k: string; v: number }[];
-  income_by_client: { k: string; v: number }[]; projects: Row[]; gst: { output: number; input: number; net: number }; accounts: Row[]; cash: number; founders: Row[];
+  income_by_client: { k: string; v: number; id?: number | null }[]; projects: Row[]; accounts: Row[]; cash: number; founders: Row[];
   pending_expenses: { v: number; n: number }; mrr: number; all_time: { revenue: number; expenses: number }; burn: number; grants: { requested: number; received: number };
 }
 
@@ -48,15 +48,15 @@ function Overview() {
         <span className="muted small">{fmtDate(d.from)} – {fmtDate(d.to)}</span>
       </div>
       <Kpis items={[
-        { label: 'Money in', value: money(gross), sub: `${d.income.n} payments`, tone: 'good' },
-        { label: 'Money out', value: money(d.expenses.v), sub: `${d.expenses.n} expenses` },
+        { label: 'Money in', value: money(gross), sub: plural(d.income.n, 'payment'), tone: 'good' },
+        { label: 'Money out', value: money(d.expenses.v), sub: plural(d.expenses.n, 'expense') },
         { label: 'Profit', value: money(d.profit), tone: d.profit < 0 ? 'bad' : 'good', sub: gross ? `${Math.round((100 * d.profit) / gross)}% margin` : '' },
-        { label: 'Invoiced', value: money(d.invoiced.total), sub: `${d.invoiced.n} invoices` },
+        { label: 'Invoiced', value: money(d.invoiced.total), sub: plural(d.invoiced.n, 'invoice') },
         { label: 'Still to get', value: money(d.still_to_get?.to_get ?? d.receivables), sub: d.still_to_get ? [d.still_to_get.pending ? `${money(d.still_to_get.pending)} invoiced, unpaid` : '', d.still_to_get.amount ? `${money(d.still_to_get.amount)} not invoiced yet` : ''].filter(Boolean).join(' · ') || 'Everything is paid' : 'All unpaid invoices', tone: (d.still_to_get?.to_get ?? d.receivables) ? 'warn' : 'good', to: '/analytics?tab=receivables' },
         ...(d.tds?.deducted ? [{ label: 'TDS to claim', value: money(d.tds.to_claim), sub: `${money(d.tds.claimed)} claimed so far · in your ITR`, tone: d.tds.to_claim ? 'warn' as const : undefined, to: '/analytics?tab=tds' }] : []),
       ]} />
       <Kpis items={[
-        { label: 'Cash in accounts', value: money(d.cash), sub: `${d.accounts.length} accounts` },
+        { label: 'Cash in accounts', value: money(d.cash), sub: plural(d.accounts.length, 'account') },
         { label: 'Monthly burn', value: money(d.burn), sub: 'Average of the last 6 months' },
         { label: 'Maintenance income / month', value: money(d.mrr) },
         { label: 'Bills to confirm', value: d.pending_expenses.n, sub: money(d.pending_expenses.v), tone: d.pending_expenses.n ? 'warn' : undefined },
@@ -67,7 +67,7 @@ function Overview() {
       </Panel>
       <div className="dash-row">
         <Panel title="Where the money went"><HBars rows={d.expense_by_category} accent /></Panel>
-        <Panel title="Who paid us"><HBars rows={d.income_by_client} /></Panel>
+        <Panel title="Who paid us"><HBars rows={d.income_by_client.map((c) => ({ ...c, to: c.id ? `/clients/${c.id}` : undefined }))} /></Panel>
       </div>
       <div className="dash-row">
         <Panel title="Receivables ageing">
@@ -76,11 +76,13 @@ function Overview() {
             { k: '61–90 days', v: d.aging.d90 ?? 0, color: 'var(--red)' }, { k: 'Over 90 days', v: d.aging.d90p ?? 0, color: '#7a1f12' },
           ].filter((x) => x.v > 0)} center={money(d.receivables).replace('₹', '₹')} />
         </Panel>
-        <Panel title="GST position (this period)">
-          <div className="split2">
-            <div><div className="l">GST collected</div><div className="v">{money(d.gst.output)}</div></div>
-            <div><div className="l">GST paid on expenses</div><div className="v">{money(d.gst.input)}</div><div className="s">Net payable {money(d.gst.net)}</div></div>
-          </div>
+        <Panel title="TDS credit (all time)" actions={d.tds?.deducted ? <Link to="/analytics?tab=tds">Open</Link> : undefined}>
+          {d.tds?.deducted ? (
+            <div className="split2">
+              <div><div className="l">Deducted by clients</div><div className="v">{money(d.tds.deducted)}</div><div className="s">{money(d.tds.claimed)} claimed in ITR</div></div>
+              <div><div className="l">Still to claim</div><div className="v">{money(d.tds.to_claim)}</div><div className="s">{money(d.tds.awaiting_certificate)} waiting for the certificate</div></div>
+            </div>
+          ) : <div className="empty mini">No TDS has been deducted by any client.</div>}
         </Panel>
       </div>
       <Panel title="Project profitability" bodyClass="flush">
@@ -89,7 +91,7 @@ function Overview() {
             <thead><tr><th>Project</th><th>Status</th><th className="num">Value</th><th className="num">Invoiced</th><th className="num">Received</th><th className="num">Costs</th><th className="num">Profit</th></tr></thead>
             <tbody>
               {d.projects.map((p) => (
-                <tr key={p.id}><td><Link to={`/projects/${p.id}`}><b>{String(p.name)}</b></Link><div className="t2">{String(p.client_name ?? '')}</div></td><td><Badge value={p.status} /></td>
+                <tr key={p.id}><td><Link to={`/projects/${p.id}`}><b>{String(p.name)}</b></Link><div className="t2"><ClientLink id={p.client_id} name={p.client_name} /></div></td><td><Badge value={p.status} /></td>
                   <td className="num">{money(p.budget)}</td><td className="num">{money(p.invoiced)}</td><td className="num">{money(p.received)}</td><td className="num">{money(p.cost)}</td>
                   <td className={`num ${Number(p.received) - Number(p.cost) < 0 ? 'neg' : ''}`}>{money(Number(p.received) - Number(p.cost))}</td></tr>
               ))}

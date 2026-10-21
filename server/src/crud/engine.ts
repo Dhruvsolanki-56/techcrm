@@ -1,6 +1,6 @@
 import { toPdf, toXlsx } from '../modules/exporters';
 import express, { type Request, type Response } from 'express';
-import { checkDates, kindFor, normalize, check, validDate } from '@crm/shared';
+import { checkDates, kindFor, normalize, check, validDate, today } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import { forbidden, HttpError, notFound } from '../shared/errors';
@@ -13,8 +13,8 @@ export const DEFAULT_LIMIT = 50;
 export const MAX_LIMIT = 500;
 
 const NICE: Record<string, string> = {
-  value: 'Deal value', budget: 'Project value', tds: 'TDS', gstin: 'GSTIN', pan: 'PAN', tax_amount: 'GST amount', live_url: 'Live site', staging_url: 'Staging',
-  repo_url: 'Repository', design_url: 'Design link', our_cost: 'We pay', client_price: 'Client pays', opening_balance: 'Opening balance', tax_rate: 'Tax rate',
+  value: 'Deal value', budget: 'Project value', tds: 'TDS', pan: 'PAN', live_url: 'Live site', staging_url: 'Staging',
+  repo_url: 'Repository', design_url: 'Design link', our_cost: 'We pay', client_price: 'Client pays', opening_balance: 'Opening balance',
   estimate_amount: 'Estimated amount', estimate_hours: 'Estimated hours',
 };
 const nice = (k: string): string => NICE[k] ?? k.replace(/_id$/, '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -49,7 +49,7 @@ export function coerce(def: ResourceDef, body: Record<string, unknown>, op: 'cre
       case 'j': out[k] = typeof v === 'string' ? v : JSON.stringify(v ?? []); break;
     }
   }
-  // field rules (letters-only names, phone digits, GSTIN, no negative money …)
+  // field rules (letters-only names, phone digits, no negative money …)
   for (const k of Object.keys(out)) {
     const kind = kindFor(def.table, k);
     if (!kind) continue;
@@ -178,11 +178,21 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
 
   const getRow = (def: ResourceDef, id: number): Row | undefined => db.prepare(`${def.select} WHERE ${def.alias}.id=?`).get(id) as Row | undefined;
 
+  // The same person sending the very same new record twice within a moment is a double click or a retry, not two records: the first one is returned.
+  const recent = new Map<string, { id: number; at: number }>();
   function create(name: string, actor: Actor): Row {
     const def = resources[name];
     if (!def) throw notFound('Unknown resource');
     const { user, body } = actor;
     if (!def.can(user, 'create', null, body)) throw forbidden();
+    const sig = `${user.id}|${def.table}|${JSON.stringify(body)}`;
+    const seen = recent.get(sig);
+    const nowMs = Date.now();
+    if (seen && nowMs - seen.at < 3000) {
+      const again = getRow(def, seen.id);
+      if (again && again.status !== 'cancelled') return shape(def, again, user) as Row;
+    }
+    for (const [k, v] of recent) if (nowMs - v.at > 10_000) recent.delete(k);
     const data = coerce(def, body, 'create');
     def.before?.('create', data, null, actor);
     const dmsg = checkDates(def.table, data);
@@ -190,11 +200,13 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
     const cols = Object.keys(data);
     const run = db.transaction(() => {
       const id = Number(db.prepare(`INSERT INTO ${def.table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...cols.map((c) => data[c])).lastInsertRowid);
+      db.prepare('DELETE FROM history WHERE entity=? AND entity_id=?').run(def.table, id); // never inherit the history of an earlier, deleted record that had this id
       const row = getRow(def, id) as Row;
       def.after?.('create', row, null, actor);
       return id;
     });
     const id = run();
+    recent.set(sig, { id, at: Date.now() });
     const row = getRow(def, id) as Row;
     logHistory(def.table, id, user, 'create', Object.keys(data).filter((k) => !SKIP.has(k) && data[k] !== null && data[k] !== '').map((k) => ({ field: k, to: plain(data[k]) })));
     ctx.audit(user, 'create', def.table, id, def.label(row), actor.ip);
@@ -239,9 +251,24 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
       const type = ENTITY_TYPE[def.table];
       if (type) purgeEntity(ctx, type, hit.row.id); // its files and notes go with it
     })();
-    logHistory(def.table, hit.row.id, actor.user, 'delete', [{ field: 'record', from: def.label(hit.row) }]);
+    // the record is gone, and its id may be handed to the next new record: its field history must not follow that id (the activity log keeps the deletion)
+    db.prepare('DELETE FROM history WHERE entity=? AND entity_id=?').run(def.table, hit.row.id);
     ctx.audit(actor.user, 'delete', def.table, hit.row.id, def.label(hit.row), actor.ip);
   }
+
+  /** A link to another record is shown by its name ("RotoTech Systems"), never as a bare number. */
+  const NAME_OF: Record<string, [string, string]> = {
+    client_id: ['clients', 'company'], project_id: ['projects', 'name'], account_id: ['accounts', 'name'], pay_account_id: ['accounts', 'name'], to_account_id: ['accounts', 'name'],
+    grant_id: ['grants', 'name'], invoice_id: ['invoices', 'number'], quote_id: ['quotes', 'number'], change_request_id: ['change_requests', 'title'], renewal_id: ['renewals', 'name'],
+    lead_id: ['leads', "COALESCE(NULLIF(company,''), name)"], owner_id: ['users', 'name'], manager_id: ['users', 'name'], assignee_id: ['users', 'name'], paid_by_id: ['users', 'name'],
+    account_manager_id: ['users', 'name'], user_id: ['users', 'name'], created_by: ['users', 'name'],
+  };
+  const readable = (field: string, v: unknown): unknown => {
+    const m = NAME_OF[field];
+    if (!m || v === null || v === undefined || v === '') return v;
+    const hit = db.prepare(`SELECT ${m[1]} AS n FROM ${m[0]} WHERE id=?`).get(v) as { n: string } | undefined;
+    return hit?.n ?? `${m[0].replace(/s$/, '')} #${String(v)} (removed)`;
+  };
 
   /** Who changed what on one record, newest first. */
   function historyOf(name: string, id: number, user: User): Row[] {
@@ -251,7 +278,12 @@ export function createEngine(ctx: AppContext, resources: ResourceMap) {
       let changes: { field: string; from?: unknown; to?: unknown }[] = [];
       try { changes = JSON.parse(r.changes || '[]'); } catch { /* empty */ }
       if (!isFounder(user)) changes = changes.filter((c) => !(def.founderCols ?? []).includes(c.field));
-      return { ...r, changes };
+      if (r.action === 'create') {
+        // a new record's story is what a person typed, not the numbers the system worked out from it
+        const noise = new Set(['number', 'subtotal', 'tax_amount', 'tax_type', 'tax_rate', 'total', 'currency', 'terms', 'paid_amount', 'import_key']);
+        changes = changes.filter((c) => !noise.has(c.field) && !(c.field === 'discount' && Number(c.to) === 0));
+      }
+      return { ...r, changes: changes.map((c) => ({ ...c, from: readable(c.field, c.from), to: readable(c.field, c.to) })) };
     });
   }
 
@@ -302,9 +334,12 @@ export function crudRouter(ctx: AppContext, engine: Engine): express.Router {
     if (!isFounder(user)) throw forbidden();
     const { rows } = engine.list(name, user, { all: true, q: typeof req.query.q === 'string' ? req.query.q : '', sort: typeof req.query.sort === 'string' ? req.query.sort : undefined, query: req.query as Record<string, unknown> });
     const def = engine.resources[name] as ResourceDef;
+    if (rows.length > 50_000) rows.length = 50_000; // an export is for reading, and a spreadsheet that size is not; narrow it with a filter
     const title = def.table.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
-    const file = `${def.table}-${new Date().toISOString().slice(0, 10)}.${format}`;
-    const body = format === 'xlsx' ? await toXlsx(title, rows) : await toPdf(title, def.table, rows);
+    const file = `${def.table}-${today()}.${format}`;
+    const filters = Object.entries(req.query).filter(([k, v]) => typeof v === 'string' && v && !['q', 'sort', 'limit', 'offset'].includes(k)).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${String(v)}`);
+    const note = [typeof req.query.q === 'string' && req.query.q ? `search “${req.query.q}”` : '', ...filters].filter(Boolean).join(' · ') || undefined;
+    const body = format === 'xlsx' ? await toXlsx(title, rows, note, def.table, user.name) : await toPdf(title, def.table, rows, note, user.name);
     ctx.audit(user, 'export', def.table, null, `${rows.length} rows (${format})`, req.ip);
     res.setHeader('Content-Type', format === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${file}"`);

@@ -66,13 +66,13 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
   const toast = useToast();
   const dialogs = useDialogs();
   const qc = useQueryClient();
-  const items = useMemo(() => (FORMS[resource] ? FORMS[resource]({ lookups: session.lookups, isFounder: session.isFounder, rec: record ?? null }) : []), [resource, session.lookups, session.isFounder, record]);
+  const items = useMemo(() => (FORMS[resource] ? FORMS[resource]({ lookups: session.lookups, isFounder: session.isFounder, rec: record ?? null, defaults, me: session.user.id }) : []), [resource, session.lookups, session.isFounder, record, defaults, session.user.id]);
   const fields = items.filter((i): i is FieldDef => !isSection(i));
   const [values, setValues] = useState<Values>(() => initialValues(items, record, defaults));
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [extra, setExtra] = useState<'files' | 'history' | null>(null);
+  const [extra, setExtra] = useState<'files' | 'history'>(FILE_TYPE[resource] ? 'files' : 'history') // the first tab is always open;
   const initial = useRef(JSON.stringify(values));
   const dirty = !saving && JSON.stringify(values) !== initial.current;
   const label = RESOURCE_LABEL[resource] ?? resource.replace(/_/g, ' ');
@@ -91,17 +91,36 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
       return (invoicesQ.data ?? []).filter((i) => i.kind === 'invoice' && !['cancelled', 'draft'].includes(String(i.status)) || i.id === record?.invoice_id)
         .map((i) => ({ v: i.id, l: `${String(i.number)} — due ${money(Math.max(0, Number(i.total) - Number(i.paid_amount)))}` }));
     }
+    // a project list shows only the chosen client's projects
+    if (name === 'project_id' && fields.some((f) => f.name === 'client_id') && values.client_id) {
+      return session.lookups.projects.filter((p) => String(p.client_id) === String(values.client_id) || String(p.id) === String(values.project_id)).map((p) => ({ v: p.id, l: p.name }));
+    }
     return undefined;
   };
 
+  const hasClient = fields.some((f) => f.name === 'client_id');
+  const projectOf = (id: unknown) => session.lookups.projects.find((p) => String(p.id) === String(id));
   const set = (name: string, v: unknown) => {
-    setValues((x) => ({ ...x, [name]: v }));
+    setValues((x) => {
+      const next: Values = { ...x, [name]: v };
+      // pick a project and its client comes with it; pick another client and a project of the old one is dropped
+      if (hasClient && name === 'project_id' && v) { const p = projectOf(v); if (p?.client_id) next.client_id = p.client_id; }
+      if (hasClient && name === 'client_id' && x.project_id) { const p = projectOf(x.project_id); if (p && v && String(p.client_id) !== String(v)) next.project_id = ''; }
+      // a payment against an invoice is for that invoice's client and project, and defaults to what is still owed on it
+      if (resource === 'payments' && name === 'invoice_id' && v) {
+        const inv = (invoicesQ.data ?? []).find((i) => String(i.id) === String(v));
+        if (inv) {
+          next.client_id = inv.client_id; next.project_id = inv.project_id ?? '';
+          if (!x.amount) next.amount = Math.max(0, Number(inv.total) - Number(inv.paid_amount));
+        }
+      }
+      return next;
+    });
     setErrors((e) => { if (!e[name]) return e; const { [name]: _drop, ...rest } = e; return rest; });
   };
 
   const save = async () => {
     const found = validate(resource, items, values);
-    if (resource === 'leads' && !String(values.company ?? '').trim() && !String(values.name ?? '').trim() && !values.client_id) found.name = 'Enter a company, a person’s name, or pick an existing client.';
     if (Object.keys(found).length) {
       setErrors(found);
       const first = Object.keys(found)[0] as string;
@@ -110,6 +129,11 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
       return;
     }
     setFormError('');
+    // starting work before the advance is in is allowed, but never by accident
+    if (resource === 'projects' && record && ['active', 'review'].includes(String(values.status)) && !['active', 'review'].includes(String(record.status))
+      && record.advance_state === 'unpaid' && values.advance_required !== false) {
+      if (!(await dialogs.confirm(`The advance of ${money(Number(record.advance_amount))} has not been paid yet. Start work anyway?`, { title: 'Advance not received', okLabel: 'Start anyway', cancelLabel: 'Wait for the advance', danger: true }))) return;
+    }
     const data: Values = {};
     for (const f of fields) {
       if (limitedTask && !['status', 'description'].includes(f.name)) continue;
@@ -173,8 +197,8 @@ function RecordForm({ resource, record, defaults, onDone, canDelete, deleteMessa
       {record && (
         <div className="rec-extra">
           <div className="seg" role="group" aria-label="More about this record">
-            {FILE_TYPE[resource] && <button type="button" className={extra === 'files' ? 'on' : ''} onClick={() => setExtra(extra === 'files' ? null : 'files')}>Files</button>}
-            <button type="button" className={extra === 'history' ? 'on' : ''} onClick={() => setExtra(extra === 'history' ? null : 'history')}>History</button>
+            {FILE_TYPE[resource] && <button type="button" className={extra === 'files' ? 'on' : ''} onClick={() => setExtra('files')}>Files</button>}
+            <button type="button" className={extra === 'history' ? 'on' : ''} onClick={() => setExtra('history')}>History</button>
           </div>
           {extra === 'files' && FILE_TYPE[resource] && <DocsPanel entityType={FILE_TYPE[resource] as string} entityId={Number(record.id)} />}
           {extra === 'history' && <HistoryPanel resource={resource} id={Number(record.id)} />}

@@ -63,7 +63,7 @@ export function dashboard(ctx: AppContext, engine: Engine, u: User): Row {
     (SELECT COUNT(*) FROM tasks t JOIN task_assignees ta ON ta.task_id=t.id WHERE ta.user_id=u.id AND t.status='done' AND t.completed_at>=datetime('now','-7 days')) AS done_week
     FROM users u WHERE u.active=1 ORDER BY open_tasks DESC`, t);
   // who pays us, where the money goes, what debits itself soon, how the work is spread
-  out.by_client = all("SELECT COALESCE(c.company,'Not from a client') k, SUM(pm.amount) v FROM payments pm LEFT JOIN clients c ON c.id=pm.client_id GROUP BY k ORDER BY v DESC LIMIT 6");
+  out.by_client = all("SELECT COALESCE(c.company,'Not from a client') k, c.id id, SUM(pm.amount) v FROM payments pm LEFT JOIN clients c ON c.id=pm.client_id GROUP BY k ORDER BY v DESC LIMIT 6");
   out.spend_by_category = all("SELECT COALESCE(category,'Uncategorised') k, SUM(amount) v FROM expenses WHERE status='paid' AND date>=? GROUP BY k ORDER BY v DESC LIMIT 7", first);
   out.auto_debits = engine.query('renewals', u, "r.status='active' AND r.auto_debit=1 AND r.our_cost>0 AND r.renewal_date IS NOT NULL AND r.renewal_date<=?", [addDays(t, 45)], 8);
   out.pending_estimates = one("SELECT COUNT(*) n, COALESCE(SUM(amount),0) v FROM expenses WHERE status='pending' AND is_estimate=1");

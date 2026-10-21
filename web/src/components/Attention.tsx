@@ -37,7 +37,7 @@ export function AttentionRow({ i, pill }: { i: AttentionItem; pill?: boolean }) 
       {!pill && <span className="att-area"><Icon name={AREA_ICON[i.area] ?? 'alert'} />{i.area}</span>}
       <div className="grow"><div className="t">{i.title}</div><div className="s">{i.detail}</div></div>
       {i.amount ? <b className="tnum small">{money(i.amount)}</b> : null}
-      {i.date ? <span className="small muted nowrap">{fmtDate(i.date).replace(/ \d{4}$/, '')}</span> : null}
+      {i.date ? <span className="small muted nowrap">{fmtDate(i.date)}</span> : null}
     </>
   );
   if (!i.children?.length) return <Link to={i.link} className="li att-row">{head}<Icon name="arrowR" /></Link>;

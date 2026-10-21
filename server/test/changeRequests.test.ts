@@ -13,13 +13,13 @@ describe('lead → quotation → client & project', () => {
   let projectId = 0;
   it('turns the accepted quotation into the project scope and value when the lead converts', async () => {
     const quote = (await d.F.list('/quotes')).j[0];
-    expect(quote.total).toBe(383500);
+    expect(quote.total).toBe(325000);
     const conv = await d.F.post(`/leads/${d.leads.l1}/convert`, { create_project: true, quote_id: quote.id, project_name: 'Kumar Textiles online store' });
     expect(conv.s).toBe(200);
     clientId = conv.j.client_id;
     projectId = conv.j.project_id;
     const project = (await d.F.get(`/projects/${projectId}`)).j;
-    expect(project.budget).toBe(325000); // the quoted price without GST
+    expect(project.budget).toBe(325000); // the quoted price
     expect(project.client_name).toBe('Kumar Textiles');
     const q = (await d.F.get(`/quotes/${quote.id}`)).j;
     expect(q).toMatchObject({ status: 'accepted', project_id: projectId, client_id: clientId });
@@ -43,8 +43,10 @@ describe('lead → quotation → client & project', () => {
       expect(cr.j.ref).toMatch(/^CR-\d{4}$/);
       expect(cr.j.requested_on).toBe(today);
       crId = cr.j.id;
-      const timeline = (await d.F.get(`/notes?entity_type=change_request&entity_id=${crId}`)).j as { body: string }[];
-      expect(timeline.some((n) => /Change request raised \(before delivery\)/.test(n.body))).toBe(true);
+      // the request's own page shows its history (no duplicate "Status: a → b" notes); the project timeline gets the one-line story
+      const projectTimeline = (await d.F.get(`/notes?entity_type=project&entity_id=${cr.j.project_id}`)).j as { body: string }[];
+      expect(projectTimeline.some((n) => /Change request raised \(before delivery\)/.test(n.body))).toBe(true);
+      expect(((await d.F.get(`/notes?entity_type=change_request&entity_id=${crId}`)).j as unknown[]).length).toBe(0);
     });
     it('is never locked: any status can be set at any time, and the history records every change', async () => {
       for (const status of ['estimated', 'delivered', 'requested']) expect((await d.F.put(`/change_requests/${crId}`, { status })).s).toBe(200);
@@ -61,8 +63,8 @@ describe('lead → quotation → client & project', () => {
       expect(quote).toMatchObject({ project_id: projectId, client_id: clientId, change_request_id: crId, status: 'draft' });
       expect(quote.items[0]).toMatchObject({ qty: 1, rate: 24000 });
       expect(quote.items[0].description).toMatch(/Add a wishlist page \(about 12 hours\)/);
-      expect(quote.tax_type).toBe('cgst_sgst'); // demo company has a GSTIN: GST applies
-      expect(quote.total).toBe(28320);
+      expect(quote.tax_type).toBe('none'); // no GST, ever
+      expect(quote.total).toBe(24000);
       const cr = (await d.F.get(`/change_requests/${crId}`)).j;
       expect(cr).toMatchObject({ status: 'quoted', quote_id: q.j.quote_id, billing_status: 'quoted', quote_number: quote.number });
       expect((await d.F.post(`/change-requests/${crId}/quote`)).s).toBe(409); // one open quotation at a time
@@ -81,12 +83,12 @@ describe('lead → quotation → client & project', () => {
       const inv = await d.F.post(`/quotes/${cr.quote_id}/to-invoice`);
       expect(inv.s).toBe(200);
       const invoice = (await d.F.get(`/invoices/${inv.j.invoice_id}`)).j;
-      expect(invoice).toMatchObject({ change_request_id: crId, project_id: projectId, client_id: clientId, total: 28320 });
+      expect(invoice).toMatchObject({ change_request_id: crId, project_id: projectId, client_id: clientId, total: 24000 });
       expect((await d.F.get(`/change_requests/${crId}`)).j).toMatchObject({ invoice_id: invoice.id, billing_status: 'invoiced' });
       await d.F.put(`/invoices/${invoice.id}`, { status: 'sent' });
-      await d.F.post('/payments', { invoice_id: invoice.id, date: today, amount: 28320, account_id: d.bank });
+      await d.F.post('/payments', { invoice_id: invoice.id, date: today, amount: 24000, account_id: d.bank });
       expect((await d.F.get(`/change_requests/${crId}`)).j.billing_status).toBe('paid');
-      expect((await d.F.get(`/projects/${projectId}`)).j.total_received).toBe(28320);
+      expect((await d.F.get(`/projects/${projectId}`)).j.total_received).toBe(24000);
     });
     it('links tasks to its own project only', async () => {
       const t = await d.F.post('/tasks', { title: 'Build the wishlist page', change_request_id: crId });
@@ -158,7 +160,7 @@ describe('delivery analytics', () => {
     expect(a.change_requests.open).toBeGreaterThanOrEqual(1);
     expect(a.change_requests.by_phase.length).toBeGreaterThanOrEqual(1);
     expect(a.change_requests.money.approved).toBeGreaterThanOrEqual(24000);
-    expect(a.change_requests.money.collected).toBeGreaterThanOrEqual(28320);
+    expect(a.change_requests.money.collected).toBeGreaterThanOrEqual(24000);
     expect(a.change_requests.monthly).toHaveLength(6);
     expect(a.tasks.weekly).toHaveLength(8);
     expect(a.team.length).toBeGreaterThanOrEqual(6);

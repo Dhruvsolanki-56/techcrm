@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { addDays, today } from '@crm/shared';
+import { addDays, dmy, today } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import { markOverdue } from '../domain/billing';
@@ -23,7 +23,7 @@ export function runReminders(ctx: AppContext): void {
   }
   const founders = db.prepare("SELECT id FROM users WHERE role='founder' AND active=1").all() as { id: number }[];
   for (const r of db.prepare("SELECT * FROM renewals WHERE status='active' AND auto_debit=0 AND renewal_date IS NOT NULL AND renewal_date<=?").all(addDays(t, 14)) as Row[]) {
-    for (const f of founders) once(ctx, f.id, `Renewal ${r.renewal_date < t ? 'overdue' : `due ${r.renewal_date}`}: ${r.name}`, '/renewals');
+    for (const f of founders) once(ctx, f.id, `Renewal ${r.renewal_date < t ? 'overdue' : `due ${dmy(r.renewal_date)}`}: ${r.name}`, '/renewals');
   }
   for (const r of db.prepare("SELECT number, id FROM invoices WHERE status='overdue'").all() as { number: string; id: number }[]) {
     for (const f of founders) once(ctx, f.id, `Invoice overdue: ${r.number}`, `/invoices/${r.id}`);

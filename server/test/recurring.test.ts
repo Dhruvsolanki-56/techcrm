@@ -56,25 +56,16 @@ describe('a fixed subscription', () => {
 });
 
 describe('a bill whose amount changes every month (postpaid phone)', () => {
-  it('adds a pending estimate based on the last real bill, asks the founders for the real amount and confirms it when edited', async () => {
-    const bill = await d.F.post('/renewals', { name: 'Airtel postpaid', kind: 'bill', vendor: 'Airtel', renewal_date: addMonths(today, -1), cycle: 'monthly', our_cost: 834, auto_debit: true, amount_varies: true, pay_account_id: d.bank });
+  it('is an ordinary company subscription: it debits the usual amount and the real amount is entered on that expense', async () => {
+    const bill = await d.F.post('/renewals', { name: 'Airtel postpaid', kind: 'bill', vendor: 'Airtel', renewal_date: addMonths(today, -1), cycle: 'monthly', our_cost: 834, pay_account_id: d.bank });
     expect(bill.s).toBe(201);
     const first = ((await d.F.list('/expenses')).j as Record<string, any>[]).find((e) => e.renewal_id === bill.j.id) as Record<string, any>;
-    expect(first).toMatchObject({ status: 'pending', is_estimate: 1, amount: 834, category: 'Telecom & Utilities' });
-    const paidBefore = one<{ v: number }>("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE status='paid'").v;
-    expect(one<{ v: number }>("SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE status='paid' AND is_estimate=1").v).toBe(0); // estimates are not money spent
-    expect(paidBefore).toBeGreaterThan(0);
-    const note = ((await d.F.get('/notifications')).j.items as { text: string }[]).find((n) => /Bill due: Airtel postpaid/.test(n.text));
-    expect(note).toBeTruthy();
-    // the real bill arrives
-    const fixed = await d.F.put(`/expenses/${first.id}`, { amount: 912.5, status: 'paid' });
-    expect(fixed.j).toMatchObject({ amount: 912.5, status: 'paid', is_estimate: 0 });
-    // next month's estimate is based on the real bill, not the typical amount
-    const nextMonth = addMonths(bill.j.renewal_date, 1);
-    runAutoDebits(d.app.ctx, nextMonth);
+    expect(first).toMatchObject({ status: 'paid', is_estimate: 0, amount: 834, category: 'Telecom & Utilities' });
+    const fixed = await d.F.put(`/expenses/${first.id}`, { amount: 912.5 });
+    expect(fixed.j).toMatchObject({ amount: 912.5, status: 'paid' });
+    runAutoDebits(d.app.ctx, addMonths(bill.j.renewal_date, 1));
     const second = (d.app.ctx.db.prepare('SELECT * FROM expenses WHERE renewal_id=? ORDER BY date DESC, id DESC').get(bill.j.id)) as Record<string, any>;
-    expect(second).toMatchObject({ amount: 912.5, status: 'pending', is_estimate: 1 });
-    expect((await d.F.get('/finance/summary')).j.pending_expenses.n).toBeGreaterThanOrEqual(1);
+    expect(second.amount).toBe(834); // the subscription's own amount, not last month's correction
   });
 });
 
@@ -84,6 +75,5 @@ describe('what the founders see', () => {
     const dash = (await d.F.get('/dashboard')).j;
     expect(dash.kpi.recurring_cost).toBeGreaterThan(0);
     expect(Array.isArray(dash.auto_debits)).toBe(true);
-    expect(dash.pending_estimates.n).toBeGreaterThanOrEqual(1);
   });
 });

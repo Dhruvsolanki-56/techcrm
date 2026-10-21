@@ -360,9 +360,11 @@ export function runSeed(ctx: AppContext, opts: SeedOptions): SeedReport {
         [!toDate(when) && !day && when ? `Renewal Date in sheet: ${when}` : null, clean(r.notes, 2000)].filter(Boolean).join('\n') || null, own.id, own.pending, clean(r.category), key, accountId, 0);
       sec('subscriptions');
     }
+    // ChatGPT Plus is Vansh's own subscription: listed so it is remembered, never paid from company money
+    db.prepare("UPDATE renewals SET scope='personal', auto_debit=0 WHERE name LIKE 'ChatGPT%' AND import_key LIKE 'gs:sub:%'").run();
     // the postpaid phone bill: the amount is different every month
     if (!seen('renewals', 'seed:bill:airtel')) {
-      insRenewal.run('bill', 'Airtel postpaid phone bill', 'Airtel', nextMonthDay(26), 'monthly', 834, 'Postpaid: the amount changes every month. The CRM adds an estimate (the last bill) each month — open it and enter the real amount.', null, null, 'Telecom & Utilities', 'seed:bill:airtel', accountId, 1);
+      insRenewal.run('bill', 'Airtel postpaid phone bill', 'Airtel', nextMonthDay(26), 'monthly', 834, 'Postpaid: the usual amount is added as an expense every month — open that expense and enter the real amount when the bill differs.', null, null, 'Telecom & Utilities', 'seed:bill:airtel', accountId, 0);
       sec('subscriptions');
     }
 
@@ -424,7 +426,7 @@ export function runSeed(ctx: AppContext, opts: SeedOptions): SeedReport {
     for (const p of invProjects) {
       const key = `seed:invoice:${p.import_key}`;
       if (seen('invoices', key)) continue;
-      const items = p.pays.map((x) => ({ description: x.notes || 'Payment received', hsn: '', qty: 1, rate: x.amount }));
+      const items = p.pays.map((x) => ({ description: x.notes || 'Payment received', qty: 1, rate: x.amount }));
       const total = round2(items.reduce((t, i) => t + i.rate, 0));
       const issue = p.pays[0]?.date as string;
       const last = p.pays[p.pays.length - 1]?.date as string;
@@ -442,7 +444,7 @@ export function runSeed(ctx: AppContext, opts: SeedOptions): SeedReport {
       const id = Number(db.prepare(`INSERT INTO invoices(number,kind,client_id,project_id,title,issue_date,due_date,status,items,subtotal,discount,tax_type,tax_rate,tax_amount,total,currency,terms,notes,created_by,import_key)
         VALUES(?,'invoice',?,?,?,?,?,'sent',?,?,0,'none',0,0,?,'INR',?,?,?,?)`)
         .run(nextNumber(ctx, 'invoices', s.invoice_prefix || 'INV', STRIKAR_DATE), strikar.cid, strikar.pid, 'Strikar Lifescience Website — 2nd tranche', STRIKAR_DATE, STRIKAR_DATE,
-          JSON.stringify([{ description: 'Strikar Lifescience Website — 2nd tranche', hsn: '', qty: 1, rate: 65000 }]), 65000, 65000, s.terms_invoice || null,
+          JSON.stringify([{ description: 'Strikar Lifescience Website — 2nd tranche', qty: 1, rate: 65000 }]), 65000, 65000, s.terms_invoice || null,
           'Paid in full. The client deducted ₹13,000 TDS, which is tracked separately for the income-tax return.', founder.id, 'seed:invoice:strikar-2').lastInsertRowid);
       db.prepare("INSERT INTO payments(invoice_id,client_id,project_id,account_id,date,amount,tds,method,category,notes,created_by,import_key) VALUES(?,?,?,?,?,65000,13000,'Bank Transfer','Product Sales',?,?,?)")
         .run(id, strikar.cid, strikar.pid, accountId, STRIKAR_DATE, 'Strikar Lifescience Website — 2nd tranche. 10% TDS ₹13,000 deducted by the client.', founder.id, STRIKAR_PAYMENT_KEY);

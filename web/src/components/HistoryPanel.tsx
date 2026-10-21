@@ -1,6 +1,5 @@
-import { fmtDate, money } from '../lib/format';
+import { fmtDate, money, fmtDateTime } from '../lib/format';
 import { useGet } from '../lib/hooks';
-import { ago } from '../shell/Bell';
 import { Icon } from '../ui/Icon';
 import { pretty } from '../ui/primitives';
 
@@ -37,8 +36,8 @@ export function HistoryPanel({ resource, id }: { resource: string; id: number })
         <div className="tl-item" key={h.id}>
           <div className="tl-ico"><Icon name={h.action === 'create' ? 'plus' : h.action === 'delete' ? 'trash' : 'edit'} /></div>
           <div style={{ minWidth: 0 }}>
-            <div className="tl-meta"><b>{h.user_name ?? 'Someone'}</b> {h.action === 'create' ? 'created this' : h.action === 'delete' ? 'deleted this' : 'changed'} · <span>{ago(h.created_at)}</span></div>
-            {h.action !== 'delete' && h.changes.length > 0 && (
+            <div className="tl-meta"><b>{h.user_name ?? 'Someone'}</b> {h.action === 'create' ? 'created this' : h.action === 'delete' ? 'deleted this' : 'changed'} · <span>{fmtDateTime(h.created_at)}</span></div>
+            {h.action === 'update' && h.changes.length > 0 && ( // a new record shows only who made it and when — never a dump of every field
               <ul className="hist-changes">
                 {h.changes.map((c) => (
                   <li key={c.field}>

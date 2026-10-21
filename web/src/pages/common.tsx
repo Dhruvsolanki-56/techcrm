@@ -37,4 +37,9 @@ export const Cell2 = ({ top, sub }: { top: ReactNode; sub?: ReactNode }) => <div
 
 export const LinkTo = ({ to, children }: { to: string; children: ReactNode }) => <Link className="ln" to={to} onClick={(e) => e.stopPropagation()}>{children}</Link>;
 
+/** A client / project / invoice / lead name that is always a real link when we know which record it is. */
+export const ClientLink = ({ id, name, tab }: { id?: unknown; name?: unknown; tab?: string }) => (id ? <LinkTo to={`/clients/${String(id)}${tab ? `?tab=${tab}` : ''}`}>{String(name ?? '—')}</LinkTo> : <>{String(name ?? '')}</>);
+export const ProjectLink = ({ id, name, tab }: { id?: unknown; name?: unknown; tab?: string }) => (id ? <LinkTo to={`/projects/${String(id)}${tab ? `?tab=${tab}` : ''}`}>{String(name ?? '—')}</LinkTo> : <>{String(name ?? '')}</>);
+export const InvoiceLink = ({ id, number }: { id?: unknown; number?: unknown }) => (id ? <LinkTo to={`/invoices/${String(id)}`}>{String(number ?? '—')}</LinkTo> : <>{String(number ?? '')}</>);
+
 export const dash = (v: unknown): ReactNode => (v == null || v === '' ? <span className="faint">—</span> : String(v));

@@ -90,7 +90,7 @@ export function AuthScreen({ state }: { state: AuthState }) {
           <div className="big">Every client, project, file, invoice and login — in one place instead of five.</div>
           <ul>
             <li><Icon name="building" />Leads, clients and full project history</li>
-            <li><Icon name="receipt" />Quotations, change requests, GST invoices and payments</li>
+            <li><Icon name="receipt" />Quotations, change requests, invoices and payments</li>
             <li><Icon name="lock" />Encrypted vault for client server access</li>
             <li><Icon name="check" />Tasks for the team, with deadlines that do not slip</li>
           </ul>

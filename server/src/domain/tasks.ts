@@ -1,3 +1,4 @@
+import { dmy } from '@crm/shared';
 import type { AppContext } from '../core/context';
 import type { Row } from '../db/connection';
 import { HttpError } from '../shared/errors';
@@ -12,7 +13,7 @@ export const taskLink = (id: number): string => `/tasks?open=${id}`;
 export function createTaskDomain(ctx: AppContext, getEngine: () => Engine) {
   const { db } = ctx;
   const userName = (id: number): string => (db.prepare('SELECT name FROM users WHERE id=?').get(id) as { name: string } | undefined)?.name ?? 'someone';
-  const niceDate = (d: string): string => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const niceDate = (d: string): string => dmy(d);
 
   const assigneeIds = (taskId: number): number[] =>
     (db.prepare('SELECT user_id FROM task_assignees WHERE task_id=? ORDER BY rowid').all(taskId) as { user_id: number }[]).map((r) => r.user_id);

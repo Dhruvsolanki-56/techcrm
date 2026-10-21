@@ -36,7 +36,7 @@ export async function createDemo(env: Record<string, string> = {}): Promise<Demo
   }
   await call('PUT', '/settings', {
     company_name: 'TechSentinals (demo)', company_address: '12 Innovation Park, Baner, Pune 411045', company_email: 'hello@techsentinals.example', company_phone: '+91 98765 43210',
-    gstin: '27ABCDE1234F1Z5', pan: 'ABCDE1234F', state: 'Maharashtra', bank_account_name: 'TechSentinals', bank_name: 'HDFC Bank, Baner', bank_account_no: '50200012345678', bank_ifsc: 'HDFC0000123', upi_id: 'techsentinals@hdfcbank',
+    pan: 'ABCDE1234F', state: 'Maharashtra', bank_account_name: 'TechSentinals', bank_name: 'HDFC Bank, Baner', bank_account_no: '50200012345678', bank_ifsc: 'HDFC0000123', upi_id: 'techsentinals@hdfcbank',
   });
   const bank = (await call('POST', '/accounts', { name: 'HDFC Current A/c', type: 'bank', opening_balance: 250000 })).id as number;
   await call('POST', '/accounts', { name: 'Founders UPI', type: 'upi', opening_balance: 12000 });
@@ -45,12 +45,12 @@ export async function createDemo(env: Record<string, string> = {}): Promise<Demo
   await call('POST', '/transfers', { date: ago(20), kind: 'withdrawal', amount: 50000, account_id: bank, user_id: u.meera, notes: 'Founder draw' });
 
   const clients: Record<string, number> = {};
-  for (const [k, company, industry, city, state, gst, cn, ce, cp] of [
-    ['acme', 'Acme Logistics Pvt Ltd', 'Logistics', 'Mumbai', 'Maharashtra', '27AAACA1234A1Z9', 'Neha Joshi', 'neha@acmelogistics.example', '+91 99200 11122'],
-    ['green', 'GreenLeaf Organics', 'Retail / D2C', 'Bengaluru', 'Karnataka', '29AAGCG5678B1Z2', 'Vikram Rao', 'vikram@greenleaf.example', '+91 98450 33445'],
-    ['bright', 'BrightPath Academy', 'Education', 'Pune', 'Maharashtra', '', 'Sunita Desai', 'sunita@brightpath.example', '+91 90110 55667'],
+  for (const [k, company, industry, city, state, cn, ce, cp] of [
+    ['acme', 'Acme Logistics Pvt Ltd', 'Logistics', 'Mumbai', 'Maharashtra', 'Neha Joshi', 'neha@acmelogistics.example', '+91 99200 11122'],
+    ['green', 'GreenLeaf Organics', 'Retail / D2C', 'Bengaluru', 'Karnataka', 'Vikram Rao', 'vikram@greenleaf.example', '+91 98450 33445'],
+    ['bright', 'BrightPath Academy', 'Education', 'Pune', 'Maharashtra', 'Sunita Desai', 'sunita@brightpath.example', '+91 90110 55667'],
   ] as const) {
-    clients[k] = (await call('POST', '/clients', { company, industry, city, state, gstin: gst, status: 'active', account_manager_id: u.isha, website: `${company.split(' ')[0]?.toLowerCase()}.example`, address: 'Plot 12, Business District' })).id;
+    clients[k] = (await call('POST', '/clients', { company, industry, city, state, status: 'active', account_manager_id: u.isha, website: `${company.split(' ')[0]?.toLowerCase()}.example`, address: 'Plot 12, Business District' })).id;
     await call('POST', '/contacts', { client_id: clients[k], name: cn, email: ce, phone: cp, role: 'Owner / Decision maker', is_primary: true });
   }
   const proj: Record<string, number> = {};
@@ -96,21 +96,21 @@ export async function createDemo(env: Record<string, string> = {}): Promise<Demo
   await call('POST', '/notes', { entity_type: 'project', entity_id: proj.acme, kind: 'note', body: 'Client confirmed: vehicle count will grow to 200 by year end.' });
 
   const mkInv = async (client: number, project: number, title: string, items: unknown[], issue: string, due: string, paid: [number, string, number?][]) => {
-    const inv = await call('POST', '/invoices', { client_id: client, project_id: project, title, items, issue_date: issue, due_date: due, tax_type: 'cgst_sgst', tax_rate: 18, status: 'sent' });
+    const inv = await call('POST', '/invoices', { client_id: client, project_id: project, title, items, issue_date: issue, due_date: due, status: 'sent' });
     for (const [amount, date, tds] of paid) await call('POST', '/payments', { invoice_id: inv.id, date, amount, tds: tds ?? 0, account_id: bank, method: 'Bank Transfer', reference: `UTR${Math.floor(Math.random() * 1e9)}` });
     return inv;
   };
-  await mkInv(clients.acme as number, proj.acme as number, 'Fleet portal — advance 30%', [{ description: 'Advance payment (30%) — Fleet Tracking Portal', hsn: '998314', qty: 1, rate: 135000 }], ago(44), ago(29), [[159300, ago(40)]]);
-  await mkInv(clients.acme as number, proj.acme as number, 'Fleet portal — milestone 1', [{ description: 'Design sign-off milestone', hsn: '998314', qty: 1, rate: 90000 }], ago(18), ago(3), [[50000, ago(10)]]);
-  await mkInv(clients.green as number, proj.green as number, 'Online store — phase 1', [{ description: 'Store redesign & migration', hsn: '998314', qty: 1, rate: 140000 }], ago(30), ago(15), [[165200, ago(14), 0]]);
-  await mkInv(clients.green as number, proj.green as number, 'Online store — final', [{ description: 'Launch milestone', hsn: '998314', qty: 1, rate: 80000 }], ago(1), inn(14), []);
-  await mkInv(clients.bright as number, proj.bright as number, 'Website maintenance — last month', [{ description: 'Monthly maintenance plan', hsn: '998313', qty: 1, rate: 6000 }], ago(33), ago(18), [[7080, ago(15), 600]]);
-  await call('POST', '/quotes', { lead_id: leads.l1, title: 'Proposal — Kumar Textiles online store', items: [{ description: 'E-commerce store design & build (up to 100 products)', hsn: '998314', qty: 1, rate: 280000 }, { description: 'Payment gateway + shipping integration', qty: 1, rate: 45000 }], status: 'sent' });
-  for (const [category, vendor, amount, tax, d, paid_by_id, project_id] of [
+  await mkInv(clients.acme as number, proj.acme as number, 'Fleet portal — advance 30%', [{ description: 'Advance payment (30%) — Fleet Tracking Portal', qty: 1, rate: 135000 }], ago(44), ago(29), [[135000, ago(40)]]);
+  await mkInv(clients.acme as number, proj.acme as number, 'Fleet portal — milestone 1', [{ description: 'Design sign-off milestone', qty: 1, rate: 90000 }], ago(18), ago(3), [[50000, ago(10)]]);
+  await mkInv(clients.green as number, proj.green as number, 'Online store — phase 1', [{ description: 'Store redesign & migration', qty: 1, rate: 140000 }], ago(30), ago(15), [[140000, ago(14), 0]]);
+  await mkInv(clients.green as number, proj.green as number, 'Online store — final', [{ description: 'Launch milestone', qty: 1, rate: 80000 }], ago(1), inn(14), []);
+  await mkInv(clients.bright as number, proj.bright as number, 'Website maintenance — last month', [{ description: 'Monthly maintenance plan', qty: 1, rate: 6000 }], ago(33), ago(18), [[6000, ago(15), 600]]);
+  await call('POST', '/quotes', { lead_id: leads.l1, title: 'Proposal — Kumar Textiles online store', items: [{ description: 'E-commerce store design & build (up to 100 products)', qty: 1, rate: 280000 }, { description: 'Payment gateway + shipping integration', qty: 1, rate: 45000 }], status: 'sent' });
+  for (const [category, vendor, amount, _tax, d, paid_by_id, project_id] of [
     ['Salaries / Stipends', 'Interns stipend', 24000, 0, ago(5), null, null], ['Software & SaaS', 'Figma + GitHub + Notion', 7800, 1190, ago(12), null, null], ['Hosting & Domains', 'AWS', 9200, 1404, ago(8), null, proj.acme],
     ['Office rent', 'WorkHub Coworking', 30000, 4576, ago(3), null, null], ['Marketing & Ads', 'Google Ads', 15000, 0, ago(22), u.isha, null], ['Freelancers / Contractors', 'Freelance illustrator', 18000, 0, ago(35), null, proj.green],
     ['Travel', 'Client visit — Mumbai', 6400, 0, ago(26), u.rohan, proj.acme],
-  ] as const) await call('POST', '/expenses', { category, vendor, amount, tax_amount: tax, date: d, paid_by_id, project_id, account_id: paid_by_id ? null : bank, status: 'paid', description: category });
+  ] as const) await call('POST', '/expenses', { category, vendor, amount, date: d, paid_by_id, project_id, account_id: paid_by_id ? null : bank, status: 'paid', description: category });
   const grant = (await call('POST', '/grants', { name: 'State startup seed grant', funder: 'Demo Innovation Council', applied_on: ago(150), requested: 250000, received: 100000, status: 'disbursed', next_report_date: inn(20) })).id as number;
   await call('POST', '/payments', { date: ago(90), amount: 100000, account_id: bank, method: 'Bank Transfer', category: 'Grant', grant_id: grant, reference: 'GRANT-T1' });
   await call('POST', '/expenses', { category: 'Software & tools', vendor: 'Cloud hosting', amount: 18000, date: ago(60), account_id: bank, status: 'paid', description: 'Prototype hosting for a year', grant_id: grant, receipt_url: 'https://example.com/receipt/123' });
@@ -130,7 +130,7 @@ export async function createDemo(env: Record<string, string> = {}): Promise<Demo
   await call('POST', '/credentials', { client_id: clients.bright, project_id: proj.bright, label: 'cPanel — brightpath.example', kind: 'Hosting / cPanel', url: 'https://cpanel.hostinger.example:2083', username: 'brightpath_admin', password: 'Demo!cPanel#2026', secret: '2FA recovery codes: 1111-2222', notes: 'Hosting login' });
   await call('POST', '/credentials', { client_id: clients.acme, project_id: proj.acme, label: 'AWS EC2 — staging', kind: 'Server / SSH', url: 'ec2-13-232-0-1.ap-south-1.compute.amazonaws.com', username: 'ubuntu', password: 'Demo!ssh#key', notes: 'Port 22' });
   await call('POST', '/events', { title: 'Acme go-live call', date: inn(11), kind: 'Launch / Go-live', project_id: proj.acme, client_id: clients.acme, notes: '11:00 AM, Google Meet' });
-  await call('POST', '/events', { title: 'GST filing due', date: inn(8), kind: 'Reminder', notes: 'GSTR-3B' });
+  await call('POST', '/events', { title: 'Income tax advance due', date: inn(8), kind: 'Reminder', notes: 'Advance tax instalment' });
   app.ctx.db.prepare('UPDATE users SET must_change_password=0').run(); // demo accounts skip "choose your own password"
 
   const F = await app.login('aarav@demo.test');

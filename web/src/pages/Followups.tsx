@@ -81,7 +81,7 @@ export default function Followups() {
                     {l.next_action ? <div className="fu-next"><Icon name="arrowR" />{String(l.next_action)}</div> : null}
                   </div>
                   <div className="fu-meta"><Badge value={l.stage} /><span className="small muted">{labelOf(FOLLOWUP_ROUNDS, String(l.followup_round))}</span></div>
-                  <div className="fu-when">{l.next_followup ? <Due date={l.next_followup} /> : <span className="faint small">No date</span>}<div className="small muted">{l.last_contact ? `last contact ${fmtDate(l.last_contact).replace(/ \d{4}$/, '')}` : 'never contacted'}</div></div>
+                  <div className="fu-when">{l.next_followup ? <Due date={l.next_followup} /> : <span className="faint small">No date</span>}<div className="small muted">{l.last_contact ? `last contact ${fmtDate(l.last_contact)}` : 'never contacted'}</div></div>
                   <div className="fu-act">
                     {l.phone ? <a className="btn sm icon" href={`tel:${String(l.phone)}`} title={`Call ${String(l.phone)}`} aria-label="Call"><Icon name="phone" /></a> : null}
                     {wa ? <a className="btn sm icon" href={wa} target="_blank" rel="noopener noreferrer" title="WhatsApp" aria-label="WhatsApp"><Icon name="chat" /></a> : null}

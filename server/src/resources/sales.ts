@@ -11,7 +11,6 @@ import { PM_SQL } from '../domain/projectMoney';
 import { inList } from '../crud/define';
 import type { ResourceDeps } from './deps';
 
-const STAGE_LABEL = Object.fromEntries(LEAD_STAGES);
 export const PROBABILITY_SQL = `CASE l.stage ${Object.entries(STAGE_PROB).map(([k, v]) => `WHEN '${k}' THEN ${v}`).join(' ')} ELSE 0 END`;
 /** Follow-Up Status, worked out the same way as the team's sheet column. */
 export const FOLLOWUP_STATUS_SQL = `CASE WHEN l.stage IN ('won','closed','lost') THEN 'Completed' WHEN l.next_followup IS NULL OR l.next_followup='' THEN 'Not Scheduled'
@@ -36,7 +35,7 @@ export function salesResources({ ctx }: ResourceDeps): Record<string, ResourceDe
     },
     notNull: ['stage', 'followup_round'],
     enums: { stage: values(LEAD_STAGES), priority: values(LEAD_PRIORITIES), followup_round: values(FOLLOWUP_ROUNDS), market: values(MARKETS), business_side: [...BUSINESS_SIDES] },
-    columns: `l.*, COALESCE(u.name, l.assigned_name) AS owner_name, c.company AS client_name, ${PROBABILITY_SQL} AS probability, ${FOLLOWUP_STATUS_SQL} AS followup_status`,
+    columns: `l.*, COALESCE(u.name, l.assigned_name) AS owner_name, c.company AS client_name, (SELECT q.project_id FROM quotes q WHERE q.lead_id=l.id AND q.project_id IS NOT NULL ORDER BY q.id DESC LIMIT 1) AS project_id, (SELECT pr.name FROM quotes q JOIN projects pr ON pr.id=q.project_id WHERE q.lead_id=l.id ORDER BY q.id DESC LIMIT 1) AS project_name, ${PROBABILITY_SQL} AS probability, ${FOLLOWUP_STATUS_SQL} AS followup_status`,
     from: 'FROM leads l LEFT JOIN users u ON u.id=l.owner_id LEFT JOIN clients c ON c.id=l.client_id',
     search: ['l.name', 'l.company', 'c.company', 'l.email', 'l.phone', 'l.city', 'l.country', 'l.requirement', 'l.notes', 'l.department', refSql('leads', 'l')],
     filters: {
@@ -82,11 +81,12 @@ export function salesResources({ ctx }: ResourceDeps): Record<string, ResourceDe
       }
     },
     after(op, row, ex, { user }) {
-      if (op === 'update' && ex && ex.stage !== row.stage) {
-        db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('lead',?,?,'system',?)")
-          .run(row.id, user.id, `Stage changed: ${STAGE_LABEL[ex.stage as keyof typeof STAGE_LABEL] ?? ex.stage} → ${STAGE_LABEL[row.stage as keyof typeof STAGE_LABEL] ?? row.stage}`);
-      }
       if (op === 'create' && row.owner_id && row.owner_id !== user.id) ctx.notify(row.owner_id, `New lead assigned: ${row.name}`, `/leads/${row.id}`);
+    },
+    beforeDelete(id, row) {
+      const q = db.prepare('SELECT COUNT(*) n FROM quotes WHERE lead_id=?').get(id) as { n: number };
+      if (q.n) throw new HttpError(409, `This lead has ${q.n} quotation${q.n === 1 ? '' : 's'}. Close it as Lost (or Closed) instead of deleting it, so the quotation history stays.`);
+      if (['accepted', 'won'].includes(String(row.stage))) throw new HttpError(409, 'This lead became a client, so it is part of that client’s history and cannot be deleted.');
     },
     onDelete: (id) => purgeEntity(ctx, 'lead', id),
   });
@@ -94,7 +94,7 @@ export function salesResources({ ctx }: ResourceDeps): Record<string, ResourceDe
   const clients = defineResource({
     table: 'clients', alias: 'c', timestamps: true,
     label: (r) => r.company,
-    fields: { company: 't', industry: 't', website: 't', gstin: 't', pan: 't', address: 't', city: 't', state: 't', country: 't', status: 't', account_manager_id: 'i', tags: 't', notes: 't' },
+    fields: { company: 't', industry: 't', website: 't', pan: 't', address: 't', city: 't', state: 't', country: 't', status: 't', account_manager_id: 'i', tags: 't', notes: 't' },
     required: ['company'], notNull: ['status'], enums: { status: values(CLIENT_STATUSES) },
     columns: `c.*, u.name AS manager_name,
       (SELECT name FROM contacts WHERE client_id=c.id ORDER BY is_primary DESC, id LIMIT 1) AS contact_name,
@@ -106,12 +106,12 @@ export function salesResources({ ctx }: ResourceDeps): Record<string, ResourceDe
       (SELECT COALESCE(SUM(pm.amount),0) FROM payments pm WHERE pm.client_id=c.id) AS lifetime_received,
       (SELECT COALESCE(SUM(i.total),0) FROM invoices i WHERE i.client_id=c.id AND i.kind='invoice' AND i.status NOT IN ('draft','cancelled'))
         + (SELECT COALESCE(SUM(pm.amount),0) FROM payments pm WHERE pm.client_id=c.id AND pm.invoice_id IS NULL) AS total_billed,
-      (SELECT COALESCE(SUM(MAX(0, ${PM_SQL.value} - ${PM_SQL.tds} - ${PM_SQL.invoiced}) + ${PM_SQL.pending}),0) FROM projects p WHERE p.client_id=c.id AND p.status<>'cancelled')
+      (SELECT COALESCE(SUM(MAX(0, ${PM_SQL.value} - ${PM_SQL.tds_eff} - ${PM_SQL.invoiced}) + ${PM_SQL.pending}),0) FROM projects p WHERE p.client_id=c.id AND p.status<>'cancelled')
         + (SELECT COALESCE(SUM(MAX(i.total-i.paid_amount,0)),0) FROM invoices i WHERE i.client_id=c.id AND i.project_id IS NULL AND i.kind='invoice' AND i.status NOT IN ('draft','cancelled')) AS to_get,
       (SELECT COALESCE(SUM(x.tds),0) FROM payments x WHERE x.client_id=c.id) AS tds_total`,
     from: 'FROM clients c LEFT JOIN users u ON u.id=c.account_manager_id',
     founderCols: ['outstanding', 'lifetime_received', 'total_billed', 'to_get', 'tds_total'],
-    search: ['c.company', 'c.industry', 'c.city', 'c.gstin', 'c.tags', 'c.website', 'c.notes', refSql('clients', 'c'),
+    search: ['c.company', 'c.industry', 'c.city', 'c.tags', 'c.website', 'c.notes', refSql('clients', 'c'),
       "(SELECT GROUP_CONCAT(name || ' ' || COALESCE(email,'') || ' ' || COALESCE(phone,''), ' ') FROM contacts WHERE client_id=c.id)"],
     filters: { status: 'c.status', account_manager_id: 'c.account_manager_id' },
     sortable: { company: 'c.company COLLATE NOCASE', status: 'c.status', created_at: 'c.created_at', project_count: 'project_count', lifetime_received: 'lifetime_received', outstanding: 'outstanding', to_get: 'to_get', id: 'c.id' },

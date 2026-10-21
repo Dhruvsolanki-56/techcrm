@@ -55,9 +55,9 @@ describe('field input', () => {
     await userEvent.type(input, 'Ravi 123 Kumar');
     expect(input).toHaveValue('Ravi  Kumar');
   });
-  it('keeps what was typed for tax numbers (capitals are applied on save)', async () => {
-    render(<Harness name="gstin" resource="clients" label="GSTIN" />);
-    await userEvent.type(screen.getByLabelText('GSTIN'), '27abcde1234f1z5');
-    expect(screen.getByLabelText('GSTIN')).toHaveValue('27abcde1234f1z5');
+  it('keeps what was typed for PAN (capitals are applied on save)', async () => {
+    render(<Harness name="pan" resource="clients" label="PAN" />);
+    await userEvent.type(screen.getByLabelText('PAN'), 'abcde1234f');
+    expect(screen.getByLabelText('PAN')).toHaveValue('abcde1234f');
   });
 });

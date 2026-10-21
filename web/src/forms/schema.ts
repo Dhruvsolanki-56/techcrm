@@ -22,12 +22,14 @@ export interface FieldDef {
   placeholder?: string;
   rows?: number;
   readonly?: boolean;
+  /** Shown only while another field has one of these values (keeps forms short). */
+  showIf?: { field: string; in: string[] };
 }
 export interface SectionDef { section: string; hint?: string }
 export type FormItem = FieldDef | SectionDef;
 export const isSection = (i: FormItem): i is SectionDef => 'section' in i;
 
-export interface FormCtx { lookups: Lookups; isFounder: boolean; rec: Record<string, unknown> | null }
+export interface FormCtx { lookups: Lookups; isFounder: boolean; rec: Record<string, unknown> | null; defaults?: Record<string, unknown>; me?: number }
 
 const PAY_STATUS: OptionList = [['paid', 'Completed'], ['pending', 'Pending']];
 const withValue = (opts: OptionList, v: unknown): OptionList => (v == null || v === '' || opts.some((o) => (Array.isArray(o) ? o[0] : o) === String(v)) ? opts : [...opts, String(v)]);
@@ -82,7 +84,7 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
       { name: 'requirement', label: 'Requirement / Interested In', type: 'textarea', full: true, rows: 2 },
       { name: 'specs', label: 'Specification (what they want built)', type: 'textarea', full: true, rows: 5, help: 'Pages, features, integrations, hosting. It is copied to the project when this lead is converted — keep adding to it after every conversation or demo.' },
       { name: 'source', label: 'Lead Source', type: 'select', options: list(c, 'lead_sources', rec?.source) },
-      { name: 'owner_id', label: 'Assigned To', type: 'select', lookup: 'users', ...(rec?.assigned_name && !rec?.owner_id ? { help: `In the sheet: ${String(rec.assigned_name)} (not a team member yet)` } : {}) },
+      { name: 'owner_id', label: 'Assigned To', type: 'select', lookup: 'users', default: c.me, ...(rec?.assigned_name && !rec?.owner_id ? { help: `In the sheet: ${String(rec.assigned_name)} (not a team member yet)` } : {}) },
       S('Where it stands'),
       { name: 'priority', label: 'Priority', type: 'select', options: LEAD_PRIORITIES, default: 'medium' },
       { name: 'stage', label: 'Sales Stage', type: 'select', options: LEAD_STAGES, required: true, default: 'new' },
@@ -97,13 +99,13 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
       { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 3 },
     ];
   },
-  clients: () => [
+  clients: (c) => [
     S('Company'),
     { name: 'company', label: 'Client Name', required: true, full: true },
     { name: 'industry', label: 'Industry' }, { name: 'website', label: 'Website' },
-    { name: 'status', label: 'Status', type: 'select', options: CLIENT_STATUSES, required: true, default: 'active' }, { name: 'account_manager_id', label: 'Account Manager', type: 'select', lookup: 'users' },
+    { name: 'status', label: 'Status', type: 'select', options: CLIENT_STATUSES, required: true, default: 'active' }, { name: 'account_manager_id', label: 'Account Manager', type: 'select', lookup: 'users', default: c.me },
     S('Billing', 'Printed on invoices.'),
-    { name: 'gstin', label: 'GSTIN' }, { name: 'pan', label: 'PAN' },
+    { name: 'pan', label: 'PAN' },
     { name: 'address', label: 'Billing address', type: 'textarea', full: true, rows: 2 },
     { name: 'city', label: 'City' }, { name: 'state', label: 'State' },
     S('Internal'),
@@ -121,8 +123,12 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     { name: 'name', label: 'Project Name', required: true, full: true },
     { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients', required: true }, { name: 'type', label: 'Type', type: 'select', options: withValue(PROJECT_TYPES, c.rec?.type) },
     { name: 'status', label: 'Status', type: 'select', options: PROJECT_STATUSES, required: true, default: 'planning' }, { name: 'priority', label: 'Priority', type: 'select', options: PRIORITIES, required: true, default: 'medium' },
-    { name: 'manager_id', label: 'Project Manager', type: 'select', lookup: 'users' },
-    ...(c.isFounder ? [{ name: 'budget', label: 'Agreed value (₹)', type: 'money', help: 'Change requests add to this separately.' } as FieldDef] : []),
+    { name: 'manager_id', label: 'Project Manager', type: 'select', lookup: 'users', default: c.me },
+    ...(c.isFounder ? [
+      { name: 'budget', label: 'Agreed value (₹)', type: 'money', help: 'Change requests add to this separately.' } as FieldDef,
+      { name: 'tds_percent', label: 'TDS the client deducts (%)', type: 'number', default: Number(c.lookups.settings.default_tds_percent) || 0, help: 'Leave 0 if this client does not deduct TDS. If they do, every payment on the project (change requests too) follows this ratio and invoices are for what you receive. A single payment can still differ.' } as FieldDef,
+      { name: 'advance_required', label: 'Advance must be paid before work starts', type: 'checkbox', default: true, help: 'You are warned in the Action center if work is active while the advance is unpaid.' } as FieldDef,
+    ] : []),
     S('Timeline'),
     { name: 'start_date', label: 'Start Date', type: 'date' }, { name: 'deadline', label: 'End Date', type: 'date' },
     S('Links', 'Shown on the project page so nobody has to ask.'),
@@ -177,7 +183,7 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
       { name: 'tds_claimed_on', label: 'Claimed in ITR on', type: 'date', help: 'Filled in automatically when the status is Claimed.' } as FormItem,
     ],
     S('Where it went'),
-    { name: 'account_id', label: 'Into account', type: 'select', lookup: 'accounts' }, { name: 'method', label: 'Payment Mode', type: 'select', options: list(c, 'payment_modes', c.rec?.method) },
+    { name: 'account_id', label: 'Into account', type: 'select', lookup: 'accounts' }, { name: 'method', label: 'Payment Mode', type: 'select', options: list(c, 'payment_modes', c.rec?.method), default: settingList(c.lookups, 'payment_modes').find((m) => /bank|neft|imps/i.test(m)) ?? settingList(c.lookups, 'payment_modes')[0] },
     { name: 'reference', label: 'Reference / UTR no.' }, { name: 'notes', label: 'Notes' },
     S('Type of income'),
     { name: 'category', label: 'Category', type: 'select', options: list(c, 'income_categories', c.rec?.category), default: 'Client payment' },
@@ -185,14 +191,14 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
   ],
   expenses: (c) => [
     S('Expense'),
-    { name: 'amount', label: 'Amount (₹)', type: 'money', required: true, help: 'Including tax.' }, { name: 'date', label: 'Date', type: 'date', required: true, default: today() },
+    { name: 'amount', label: 'Amount (₹)', type: 'money', required: true }, { name: 'date', label: 'Date', type: 'date', required: true, default: today() },
     { name: 'category', label: 'Category', type: 'select', options: list(c, 'expense_categories', c.rec?.category), required: true }, { name: 'vendor', label: 'Vendor' },
     { name: 'description', label: 'What for', full: true },
-    { name: 'status', label: 'Status', type: 'select', options: PAY_STATUS, required: true, default: 'paid' }, { name: 'tax_amount', label: 'GST included (₹)', type: 'money' },
+    { name: 'status', label: 'Status', type: 'select', options: PAY_STATUS, required: true, default: 'paid' },
     S('Who paid'),
     { name: 'account_id', label: 'From company account', type: 'select', lookup: 'accounts' },
     { name: 'paid_by_id', label: 'Or paid personally by', type: 'select', lookup: 'users', blank: '— Nobody, company paid —', help: 'The company then owes this founder.' },
-    { name: 'method', label: 'Payment Mode', type: 'select', options: list(c, 'payment_modes', c.rec?.method) }, { name: 'reference', label: 'Bill / reference no.' },
+    { name: 'method', label: 'Payment Mode', type: 'select', options: list(c, 'payment_modes', c.rec?.method), default: settingList(c.lookups, 'payment_modes').find((m) => /bank|neft|imps/i.test(m)) ?? settingList(c.lookups, 'payment_modes')[0] }, { name: 'reference', label: 'Bill / reference no.' },
     S('Link to work'),
     { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' }, { name: 'client_id', label: 'Client (if you re-bill it)', type: 'select', lookup: 'clients' },
     { name: 'grant_id', label: 'Paid from grant', type: 'select', lookup: 'grants', help: 'Counts as grant money used.' }, { name: 'receipt_url', label: 'Receipt Link', placeholder: 'Google Drive / Dropbox link' },
@@ -209,28 +215,41 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     { name: 'user_id', label: 'Founder', type: 'select', lookup: 'users', blank: '— Not about a founder —' }, { name: 'account_id', label: 'Account', type: 'select', lookup: 'accounts' },
     { name: 'to_account_id', label: 'To account (transfers only)', type: 'select', lookup: 'accounts' }, { name: 'notes', label: 'Notes' },
   ],
-  renewals: () => [
-    S('What'),
-    { name: 'name', label: 'Software / Service', required: true, full: true, placeholder: 'e.g. Figma, acmecorp.com domain, or Silver AMC' },
-    { name: 'kind', label: 'Kind', type: 'select', options: RENEWAL_KINDS, required: true, default: 'domain' }, { name: 'category', label: 'Category' }, { name: 'vendor', label: 'Vendor / registrar' },
-    { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients' }, { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' },
-    S('When & how much'),
-    { name: 'renewal_date', label: 'Next date', type: 'date' }, { name: 'cycle', label: 'Cycle', type: 'select', options: CYCLES, default: 'yearly' },
-    { name: 'our_cost', label: 'Cost per cycle (₹)', type: 'money', help: 'For a bill that changes every month, enter a typical amount and tick “amount changes”.' },
-    { name: 'client_price', label: 'Client pays per cycle (₹)', type: 'money', help: 'Maintenance plans count as monthly recurring income.' },
-    { name: 'scope', label: 'Who pays for it', type: 'select', options: [['company', 'The company (debited automatically)'], ['personal', 'A person (tracked only, not deducted)']], required: true, default: 'company', help: 'Company items are recorded as company expenses on their date. A personal subscription (e.g. one founder’s own tool) is tracked but never deducted from company money.' },
-    { name: 'owner_id', label: 'Owner / person', type: 'select', lookup: 'users', blank: '— Company —' },
-    { name: 'next_amount', label: 'Amount for the next cycle only (₹)', type: 'money', help: 'This month’s bill is different (e.g. ₹900 instead of ₹700)? Type it here: the next debit uses it once, then the normal cost applies again. Leave empty for the normal cost.' },
-    { name: 'status', label: 'Status', type: 'select', options: RENEWAL_STATUSES, required: true, default: 'active' }, { name: 'auto_renew', label: 'Renews automatically', type: 'checkbox' },
-    { name: 'auto_debit', label: 'Debit the cost automatically', type: 'checkbox', help: 'On the date the CRM records the expense for you and moves the date forward. Needs a cost, a repeating cycle and a date.' },
-    { name: 'amount_varies', label: 'Amount changes every cycle (e.g. a postpaid bill)', type: 'checkbox', help: 'Each debit is recorded as a pending estimate; edit it when the real bill arrives.' },
-    { name: 'pay_account_id', label: 'Debited from account', type: 'select', lookup: 'accounts', blank: '— Main bank account —' },
-    { name: 'notes', label: 'Notes / what is covered', type: 'textarea', full: true, rows: 2 },
-  ],
+  renewals: (c) => {
+    const plan = c.rec?.kind === 'amc' || c.defaults?.kind === 'amc';
+    if (plan) {
+      // a maintenance plan is something a CLIENT pays us for: it is not a cost
+      return [
+        S('Maintenance plan', 'What you look after for a client, and what they pay for it.'),
+        { name: 'name', label: 'Plan', required: true, full: true, placeholder: 'e.g. RotoTech — maintenance & support until December 2026' },
+        { name: 'kind', label: 'Kind', type: 'select', options: [['amc', 'Maintenance plan (AMC)']], required: true, default: 'amc' },
+        { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients', required: true }, { name: 'project_id', label: 'Project / website', type: 'select', lookup: 'projects' },
+        { name: 'client_price', label: 'Client pays (₹)', type: 'money', required: true }, { name: 'cycle', label: 'Repeats', type: 'select', options: CYCLES, default: 'monthly' },
+        { name: 'renewal_date', label: 'Plan ends / renews on', type: 'date' },
+        { name: 'status', label: 'Status', type: 'select', options: RENEWAL_STATUSES, required: true, default: 'active' },
+        { name: 'notes', label: 'What is covered', type: 'textarea', full: true, rows: 2 },
+      ];
+    }
+    return [
+      S('What'),
+      { name: 'name', label: 'Software / Service', required: true, full: true, placeholder: 'e.g. Claude, Airtel bill, acmecorp.com domain' },
+      { name: 'kind', label: 'Kind', type: 'select', options: RENEWAL_KINDS.filter(([k]) => k !== 'amc'), required: true, default: 'subscription' }, { name: 'vendor', label: 'Vendor / provider' },
+      { name: 'client_id', label: 'For which client? (optional)', type: 'select', lookup: 'clients', blank: '— none, it is for us —' }, { name: 'project_id', label: 'For which project? (optional)', type: 'select', lookup: 'projects', blank: '— none —' },
+      S('Who pays and how much'),
+      { name: 'scope', label: 'Who pays for it', type: 'select', options: [['company', 'The company — recorded as a company expense on its date'], ['personal', 'Someone else — only listed here so we remember it']], required: true, default: 'company', full: true,
+        help: 'A founder’s own tool (e.g. ChatGPT paid by Vansh) is listed for attention but never touches company money. Everything the company pays is added to Expenses automatically on its date; if one month’s bill differs (a phone bill), just edit that expense.' },
+      { name: 'owner_id', label: 'Who pays it', type: 'select', lookup: 'users', blank: '— choose —', showIf: { field: 'scope', in: ['personal'] } },
+      { name: 'our_cost', label: 'Cost per cycle (₹)', type: 'money', help: 'The usual amount.' }, { name: 'cycle', label: 'Repeats', type: 'select', options: CYCLES, default: 'monthly' },
+      { name: 'renewal_date', label: 'Next date', type: 'date' },
+      { name: 'pay_account_id', label: 'Paid from account', type: 'select', lookup: 'accounts', blank: '— Main bank account —', showIf: { field: 'scope', in: ['company'] } },
+      { name: 'status', label: 'Status', type: 'select', options: RENEWAL_STATUSES, required: true, default: 'active' },
+      { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
+    ];
+  },
   maintenance_logs: (c) => [
     { name: 'title', label: 'Issue / work item', required: true, full: true, placeholder: 'e.g. Contact form not sending emails' },
     { name: 'project_id', label: 'Project / website', type: 'select', lookup: 'projects' },
-    c.isFounder ? { name: 'client_id', label: 'Client (if no project)', type: 'select', lookup: 'clients' } : { name: 'assignee_id', label: 'Assigned to', type: 'select', lookup: 'users' },
+    c.isFounder ? { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients' } : { name: 'assignee_id', label: 'Assigned to', type: 'select', lookup: 'users' },
     { name: 'type', label: 'Type', type: 'select', options: withValue(MAINT_TYPES, c.rec?.type) }, { name: 'priority', label: 'Priority', type: 'select', options: PRIORITIES, default: 'medium' },
     { name: 'status', label: 'Status', type: 'select', options: MAINT_STATUSES, required: true, default: 'open' },
     ...(c.isFounder ? [{ name: 'assignee_id', label: 'Assigned to', type: 'select', lookup: 'users' } as FieldDef] : []),
@@ -263,13 +282,13 @@ export const FORMS: Record<string, (c: FormCtx) => FormItem[]> = {
     { name: 'title', label: 'What this payment is for', required: true, full: true, placeholder: 'e.g. Advance, Design approval, Go-live' },
     { name: 'kind', label: 'Kind', type: 'select', options: MILESTONE_KINDS, required: true, default: 'milestone' },
     { name: 'percent', label: 'Percent of agreed value', type: 'number', help: 'The amount is worked out from this. Leave empty to type an amount.' },
-    { name: 'amount', label: 'Amount before tax (₹)', type: 'money' },
+    { name: 'amount', label: 'Amount (₹)', type: 'money' }, { name: 'tds_percent', label: 'TDS on this payment (%)', type: 'number', help: 'Leave empty to use the project’s TDS; 0 means no TDS on this payment.' },
     { name: 'due_date', label: 'Bill on or after', type: 'date' },
     { name: 'reached_on', label: 'Work finished on', type: 'date', help: 'Set this when the work behind the payment is done — it then shows up as ready to invoice.' },
     { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },
   ],
   events: () => [
-    { name: 'title', label: 'Title', required: true, full: true, placeholder: 'e.g. GST filing due' }, { name: 'date', label: 'Date', type: 'date', required: true },
+    { name: 'title', label: 'Title', required: true, full: true, placeholder: 'e.g. Income tax advance due' }, { name: 'date', label: 'Date', type: 'date', required: true },
     { name: 'kind', label: 'Kind', type: 'select', options: EVENT_KINDS, required: true },
     { name: 'client_id', label: 'Client', type: 'select', lookup: 'clients' }, { name: 'project_id', label: 'Project', type: 'select', lookup: 'projects' },
     { name: 'notes', label: 'Notes', type: 'textarea', full: true, rows: 2 },

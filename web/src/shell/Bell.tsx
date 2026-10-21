@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { fmtDate } from '../lib/format';
+import { fmtDateTime } from '../lib/format';
 import { Icon } from '../ui/Icon';
 import { Popover } from '../ui/Popover';
 
@@ -18,7 +18,7 @@ export function ago(s: unknown): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   if (sec < 86400 * 7) return `${Math.floor(sec / 86400)}d ago`;
-  return fmtDate(new Date(t).toISOString());
+  return fmtDateTime(new Date(t).toISOString());
 }
 
 export function useNotifications() {

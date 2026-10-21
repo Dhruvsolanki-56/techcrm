@@ -59,11 +59,11 @@ describe('finance analytics', () => {
     expect(a.invoice_status.length).toBeGreaterThan(0);
     expect(a.recurring.mrr).toBe(6000);
   });
-  it('computes burn, aging and GST in the finance summary', async () => {
+  it('computes burn and aging in the finance summary (there is no GST)', async () => {
     const s = (await d.F.get(`/finance/summary?from=${ago(400)}&to=${today}`)).j;
     expect(s.burn).toBeGreaterThan(0);
     expect(Object.values(s.aging as Record<string, number>).reduce((a, b) => a + b, 0)).toBeCloseTo(s.receivables, 2);
-    expect(s.gst.net).toBeCloseTo(s.gst.output - s.gst.input, 2);
+    expect(s.gst).toBeUndefined();
     expect(s.expense_by_category.reduce((a: number, r: { v: number }) => a + r.v, 0)).toBeCloseTo(s.expenses.v, 2);
   });
 });

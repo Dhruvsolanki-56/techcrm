@@ -6,7 +6,7 @@ import { api, type Row } from '../lib/api';
 import { fmtDate, money } from '../lib/format';
 import { useAct, useGet } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import { Amount, editCol } from '../pages/common';
+import { Amount, ClientLink, editCol, LinkTo, ProjectLink } from '../pages/common';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Icon } from '../ui/Icon';
 import { Kanban } from '../ui/Kanban';
@@ -44,7 +44,7 @@ export function CRModal({ id, onClose }: { id: number; onClose(): void }) {
   const next = CR_STATUSES.map(([v]) => v as string).filter((s) => s !== cr.status && (isFounder || ['in_progress', 'delivered'].includes(s)));
   const quoteOpen = cr.quote_id && ['draft', 'sent', 'accepted'].includes(String(cr.quote_status));
   return (
-    <Modal title={String(cr.title)} sub={`${crRef(cr.id)} · ${String(cr.project_name)} · ${String(cr.client_name ?? '')}`} size="xl" onClose={onClose}
+    <Modal title={String(cr.title)} sub={<>{crRef(cr.id)} · <ProjectLink id={cr.project_id} name={cr.project_name} /> · <ClientLink id={cr.client_id} name={cr.client_name} /></>} size="xl" onClose={onClose}
       footer={<>
         <button type="button" className="btn" onClick={() => { onClose(); editor.open({ resource: 'change_requests', record: cr }); }}><Icon name="edit" />Edit</button>
         <button type="button" className="btn" onClick={() => { onClose(); editor.open({ resource: 'tasks', defaults: { project_id: cr.project_id, change_request_id: cr.id } }); }}><Icon name="plus" />Add task</button>
@@ -98,7 +98,7 @@ export function CRTable({ projectId, open: initialOpen }: { projectId?: number; 
   const [view, setView] = useState<number | null>(null);
   const editor = useEditor();
   const cols: Column[] = [
-    { key: 'title', label: 'Change request', sort: 'title', render: (r) => <div><div className="t1">{String(r.title)}</div><div className="t2">{!projectId && <>{String(r.project_name)} · </>}{String(r.client_name ?? '')}</div></div> },
+    { key: 'title', label: 'Change request', sort: 'title', render: (r) => <div><div className="t1">{String(r.title)}</div><div className="t2">{!projectId && <><LinkTo to={`/projects/${String(r.project_id)}?tab=changes`}>{String(r.project_name)}</LinkTo> · </>}{r.client_id ? <LinkTo to={`/clients/${String(r.client_id)}`}>{String(r.client_name ?? '')}</LinkTo> : String(r.client_name ?? '')}</div></div> },
     { key: 'phase', label: 'When', render: (r) => <PhaseTag value={r.phase} /> },
     { key: 'kind', label: 'Kind', cls: 'opt', render: (r) => labelOf(CR_KINDS, String(r.kind)) },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
@@ -138,7 +138,7 @@ export function CRBoard({ projectId }: { projectId?: number }) {
         card={(i) => (
           <>
             <div className="t">{String(i.title)}</div>
-            <div className="s"><span className="tkey">{crRef(i.id)}</span> {String(i.project_name)}</div>
+            <div className="s"><span className="tkey">{crRef(i.id)}</span> {projectId ? String(i.project_name) : <ProjectLink id={i.project_id} name={i.project_name} tab="changes" />}</div>
             <div className="f"><PhaseTag value={i.phase} /><span className="grow" />{Number(i.estimate_amount) ? <b className="tnum">{money(i.estimate_amount)}</b> : null}</div>
           </>
         )} />

@@ -61,3 +61,49 @@ export const TDS_STATUSES: [string, string][] = [
   ['certificate', 'Certificate (Form 16A) received'],
   ['claimed', 'Claimed in ITR'],
 ];
+
+export const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** 2026-01-21 → 21 Jan 2026: the one way dates are written for people, everywhere. Anything that is not a date is returned as it came. */
+export const dmy = (s: unknown): string => {
+  const str = String(s ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return String(s ?? '');
+  const m = MONTH_ABBR[Number(str.slice(5, 7)) - 1];
+  return m ? `${str.slice(8, 10)} ${m} ${str.slice(0, 4)}` : str;
+};
+
+/** 13:30 → 01:30 PM */
+export const clock12 = (h: number, m: number): string => `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
+
+/** A moment as people read it: 21 Jan 2026, 01:30 PM. Database stamps (no zone) are UTC; they are shown in the viewer's own time. */
+export function dmyTime(s: unknown): string {
+  if (!s) return '';
+  const raw = String(s).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return dmy(raw); // a plain date has no time of day
+  const d = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return raw;
+  return `${dmy(toISO(d))}, ${clock12(d.getHours(), d.getMinutes())}`;
+}
+
+const MONTH_BY_NAME: Record<string, number> = Object.fromEntries(MONTH_ABBR.map((m, i) => [m.toLowerCase(), i + 1]));
+/**
+ * What a person types for a date → 2026-01-21, or null. Accepts "21 Jan 2026", "21-01-2026", "21/1/26", "21012026", "21 january 2026".
+ * `strict` (while typing) wants a four-digit year so "21 Jan 20" is not taken as 2020 half-way through "2026".
+ */
+export function parseDate(text: string, strict = false): string | null {
+  const t = text.trim().toLowerCase().replace(/,/g, ' ').replace(/\s+/g, ' ');
+  let d: number; let mo: number; let y: number;
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (m) { y = +m[1]!; mo = +m[2]!; d = +m[3]!; } else if ((m = /^(\d{1,2})[\s\-/.]*([a-z]{3,9})[\s\-/.]*(\d{2}|\d{4})$/.exec(t))) {
+    const mon = MONTH_BY_NAME[m[2]!.slice(0, 3)];
+    if (!mon) return null;
+    d = +m[1]!; mo = mon; y = +m[3]!;
+    if (m[3]!.length === 2) { if (strict) return null; y += 2000; }
+  } else if ((m = /^(\d{1,2})[\s\-/.](\d{1,2})[\s\-/.](\d{2}|\d{4})$/.exec(t)) || (m = /^(\d{2})(\d{2})(\d{4})$/.exec(t))) {
+    d = +m[1]!; mo = +m[2]!; y = +m[3]!;
+    if (m[3]!.length === 2) { if (strict) return null; y += 2000; }
+  } else return null;
+  const iso = `${y}-${pad(mo)}-${pad(d)}`;
+  const chk = new Date(Date.UTC(y, mo - 1, d));
+  return chk.getUTCFullYear() === y && chk.getUTCMonth() === mo - 1 && chk.getUTCDate() === d && y >= 1990 && y <= 2100 ? iso : null;
+}

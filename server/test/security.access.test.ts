@@ -89,7 +89,7 @@ describe('Access control — project isolation (IDOR)', () => {
     const ev = await F.call('POST', '/events', { title: 'GreenLeaf private call', date: '2026-12-01', project_id: green.id, client_id: green.client_id });
     const kEvents = (await K.call('GET', '/events?limit=500')).j;
     expect(kEvents.some((e: { id: number }) => e.id === ev.j.id)).toBe(false);
-    expect(kEvents.some((e: { title: string }) => e.title === 'GST filing due')).toBe(true);
+    expect(kEvents.some((e: { title: string }) => e.title === 'Income tax advance due')).toBe(true);
     const kp = (await K.call('GET', '/projects?limit=500')).j;
     const kc = (await K.call('GET', '/clients?limit=500')).j;
     expect(kp.every((p: { budget?: number; cr_value?: number }) => p.budget === undefined && p.cr_value === undefined)).toBe(true);
@@ -192,7 +192,9 @@ describe('Injection & malformed input', () => {
     (wb.worksheets[0] as ExcelJS.Worksheet).eachRow((row) => row.eachCell((c) => cells.push(c.value)));
     const hit = cells.find((v) => typeof v === 'string' && v.startsWith('=HYPERLINK'));
     expect(hit).toBeTruthy(); // stored as a string value, not as { formula }
-    expect(cells.some((v) => typeof v === 'object' && v !== null && 'formula' in (v as object))).toBe(false);
+    // the only formulas are the totals row's own SUBTOTAL(…) — nothing that came from data
+    const formulas = cells.filter((v) => typeof v === 'object' && v !== null && 'formula' in (v as object)).map((v) => String((v as { formula: string }).formula));
+    expect(formulas.every((f) => /^SUBTOTAL\(109,[A-Z]+\d+:[A-Z]+\d+\)$/.test(f))).toBe(true);
   });
 });
 
@@ -239,11 +241,10 @@ describe('Input validation (same rules as the browser)', () => {
     await okc('/leads', { name: "Anne-Marie D'Souza", phone: '+91 98765-43210', email: 'anne@site.co.in', city: 'Navi Mumbai', website: 'site.co.in', value: 125000.5, stage: 'new' }, 'real-world name');
     await okc('/leads', { name: 'राहुल शर्मा', stage: 'new' }, 'Hindi names');
   });
-  it('applies the GSTIN / PAN, contacts, projects, payments, expenses, invoices, users and settings rules', async () => {
-    await rej('/clients', { company: 'GST Co', gstin: '27ABCDE1234F1Z' }, '14-character GSTIN');
+  it('applies the PAN, contacts, projects, payments, expenses, invoices, users and settings rules', async () => {
     await rej('/clients', { company: 'PAN Co', pan: '1234567890' }, 'wrong PAN format');
-    const gc = await okc('/clients', { company: 'Proper GST Co', gstin: '27abcde1234f1z5', pan: 'abcde1234f', industry: 'Retail / D2C', state: 'Maharashtra' }, 'valid GSTIN/PAN typed in lower case');
-    expect(gc.gstin).toBe('27ABCDE1234F1Z5');
+    const gc = await okc('/clients', { company: 'Proper Co', pan: 'abcde1234f', industry: 'Retail / D2C', state: 'Maharashtra' }, 'valid PAN typed in lower case');
+    expect(gc.gstin ?? null).toBeNull(); // there is no GST field any more
     expect(gc.pan).toBe('ABCDE1234F');
     await rej('/contacts', { client_id: gc.id, name: 'Priya 2' }, 'digits in a contact name');
     await rej('/projects', { name: 'Dates', client_id: gc.id, start_date: '2026-05-10', deadline: '2026-05-01' }, 'deadline before start');
@@ -251,18 +252,19 @@ describe('Input validation (same rules as the browser)', () => {
     await rej(`/projects/${pj.id}`, { deadline: '2026-04-01' }, 'moving a deadline before the start (update)', 'PUT');
     await rej('/payments', { amount: -100, date: '2026-10-01' }, 'negative payment');
     await rej('/payments', { amount: 'abc', date: '2026-10-01' }, 'non-numeric payment');
-    await rej('/expenses', { amount: 100, date: '2026-10-01', category: 'Software', tax_amount: -1 }, 'negative GST');
+    await rej('/expenses', { amount: -1, date: '2026-10-01', category: 'Software' }, 'negative expense');
     await rej('/maintenance_logs', { title: 'Too many hours', hours: 5000, status: 'open' }, '5000 hours');
     await rej('/invoices', { client_id: gc.id, issue_date: '2026-10-10', due_date: '2026-10-01', items: [{ description: 'Work', qty: 1, rate: 100 }] }, 'due before issue');
     await rej('/invoices', { client_id: gc.id, items: [{ description: 'Work', qty: 0, rate: 100 }] }, 'quantity 0');
     await rej('/invoices', { client_id: gc.id, items: [{ description: 'Work', qty: 1, rate: -100 }] }, 'negative rate');
     await rej('/invoices', { client_id: gc.id, items: [{ description: '', qty: 1, rate: 100 }] }, 'no description');
-    await rej('/invoices', { client_id: gc.id, tax_rate: 150, items: [{ description: 'Work', qty: 1, rate: 100 }] }, 'tax above 100%');
+    const noTax = await okc('/invoices', { client_id: gc.id, tax_rate: 18, tax_type: 'igst', items: [{ description: 'Work', qty: 1, rate: 100 }] }, 'tax fields are ignored');
+    expect(noTax.total).toBe(100); // GST can never be added, even if someone sends it
     await rej('/users', { name: 'Intern 007', email: 'i7@demo.test', password: 'Strong-pass-2026', role: 'intern' }, 'digits in a name');
     await rej('/users', { name: 'New Intern', email: 'bad-email', password: 'Strong-pass-2026', role: 'intern' }, 'broken email');
     await rej('/settings', { bank_ifsc: 'HDFC123' }, 'bad IFSC', 'PUT');
     await rej('/settings', { upi_id: 'not-a-upi' }, 'bad UPI', 'PUT');
-    expect((await F.call('PUT', '/settings', { bank_ifsc: 'hdfc0001234', gstin: '27AAACT1234A1Z5' })).j.bank_ifsc).toBe('HDFC0001234');
+    expect((await F.call('PUT', '/settings', { bank_ifsc: 'hdfc0001234' })).j.bank_ifsc).toBe('HDFC0001234');
   });
 });
 

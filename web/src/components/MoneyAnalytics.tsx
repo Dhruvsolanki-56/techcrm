@@ -6,6 +6,7 @@ import { fmtDate, fmtMonth, money } from '../lib/format';
 import { useGet } from '../lib/hooks';
 import { Columns, Donut, HBars, PALETTE } from '../ui/charts';
 import { Badge, ErrorBox, Kpis, Panel } from '../ui/primitives';
+import { ClientLink, ProjectLink } from '../pages/common';
 
 const Loading = () => <div className="tbl"><div className="empty">Loading…</div></div>;
 
@@ -49,7 +50,7 @@ export function ReceivablesAnalytics() {
           <thead><tr><th>Client</th><th className="num">Agreed</th><th className="num">Received</th><th className="num">Invoiced, unpaid</th><th className="num">Not invoiced</th><th className="num">Still to get</th></tr></thead>
           <tbody>{d.clients.map((c) => (
             <tr key={String(c.client_id)} className="click" onClick={() => c.client_id && nav(`/clients/${c.client_id}?tab=billing`)}>
-              <td><b>{String(c.client_name)}</b></td><td className="num">{money(c.value)}</td><td className="num">{money(c.received)}</td>
+              <td><b><ClientLink id={c.client_id} name={c.client_name} tab="billing" /></b></td><td className="num">{money(c.value)}</td><td className="num">{money(c.received)}</td>
               <td className={`num ${Number(c.pending) ? 'neg' : ''}`}>{money(c.pending)}</td><td className="num">{money(c.unbilled)}</td><td className="num"><b>{money(c.to_get)}</b></td>
             </tr>
           ))}</tbody>
@@ -61,7 +62,7 @@ export function ReceivablesAnalytics() {
           <thead><tr><th>Project</th><th>Status</th><th className="num">Agreed</th><th className="num">Received</th><th className="num">Invoiced, unpaid</th><th className="num">Not invoiced</th><th className="num">Still to get</th></tr></thead>
           <tbody>{d.projects.map((p) => (
             <tr key={`${String(p.id)}-${String(p.client_id)}`} className="click" onClick={() => nav(p.id ? `/projects/${p.id}?tab=finance` : `/clients/${p.client_id}?tab=billing`)}>
-              <td><b>{String(p.name)}</b><div className="t2">{String(p.client_name ?? '')}</div></td><td><Badge value={p.status} /></td><td className="num">{p.id ? money(p.value) : '—'}</td><td className="num">{money(p.received)}</td>
+              <td><b><ProjectLink id={p.id} name={p.name} tab="finance" /></b><div className="t2"><ClientLink id={p.client_id} name={p.client_name} /></div></td><td><Badge value={p.status} /></td><td className="num">{p.id ? money(p.value) : '—'}</td><td className="num">{money(p.received)}</td>
               <td className={`num ${Number(p.pending) ? 'neg' : ''}`}>{money(p.pending)}</td><td className="num">{Number(p.unbilled) ? money(p.unbilled) : '—'}</td><td className="num"><b>{Number(p.to_get) ? money(p.to_get) : '—'}</b></td>
             </tr>
           ))}</tbody>
@@ -139,7 +140,7 @@ function MoneyExplorer({ kind }: { kind: 'spending' | 'income' }) {
                   <thead><tr><th>{by === 'month' ? 'Month' : 'Group'}</th><th className="num">Amount</th><th className="num">Share</th><th className="num">Count</th></tr></thead>
                   <tbody>{d.rows.map((g) => (
                     <tr key={String(g.key)} className={FILTER_KEY[by] && String(g.key) !== '0' ? 'click' : ''} onClick={() => drill(g)}>
-                      <td><b>{by === 'month' ? fmtMonth(String(g.label)) : g.label}</b><div className="bar" style={{ marginTop: 4 }}><i style={{ width: `${Math.max(2, g.share)}%` }} /></div></td>
+                      <td><b>{by === 'month' ? fmtMonth(String(g.label)) : by === 'client' && String(g.key) !== '0' ? <ClientLink id={g.key} name={g.label} /> : by === 'project' && String(g.key) !== '0' ? <ProjectLink id={g.key} name={g.label} /> : g.label}</b><div className="bar" style={{ marginTop: 4 }}><i style={{ width: `${Math.max(2, g.share)}%` }} /></div></td>
                       <td className="num">{money(g.amount)}</td><td className="num">{g.share}%</td><td className="num">{g.count}</td>
                     </tr>
                   ))}</tbody>
@@ -225,12 +226,13 @@ export function SubscriptionsAnalytics() {
   return (
     <div className="stack">
       <Kpis items={[
-        { label: 'Running cost / month', value: money(d.monthly_total) }, { label: 'Company pays', value: money(d.company_monthly), sub: 'Debited automatically' },
-        { label: 'People pay', value: money(d.personal_monthly), sub: 'Tracked, not deducted' }, { label: 'Yearly', value: money(d.monthly_total * 12) },
+        { label: 'Company pays / month', value: money(d.company_monthly), sub: 'Added to Expenses on each date' },
+        { label: 'Company pays / year', value: money(d.company_monthly * 12) },
+        { label: 'Someone else pays / month', value: money(d.personal_monthly), sub: 'Only listed, not company money' },
       ]} />
       <div className="dash-row">
-        <Panel title="By kind"><HBars rows={d.by_kind.map((x) => ({ k: x.label, v: x.amount }))} accent /></Panel>
-        <Panel title="By owner"><HBars rows={d.by_owner.map((x) => ({ k: x.label, v: x.amount }))} /></Panel>
+        <Panel title="Company cost by kind"><HBars rows={d.by_kind.map((x) => ({ k: x.label, v: x.amount }))} accent /></Panel>
+        <Panel title="Paid by someone else, by person"><HBars rows={d.by_owner.map((x) => ({ k: x.label, v: x.amount }))} /></Panel>
       </div>
       <Panel title="Coming up in the next 30 days" bodyClass="flush">
         {d.next_30.length ? <div className="list">{d.next_30.map((r) => <Link key={r.id} to="/renewals" className="li"><div className="grow"><div className="t">{r.name}</div><div className="s">{r.scope === 'personal' ? 'Person · not deducted' : r.auto ? 'Company · automatic' : 'Company · manual'}</div></div><span className="small muted">{fmtDate(r.date)}</span><b className="tnum">{money(r.amount)}</b></Link>)}</div> : <div className="empty mini">Nothing in the next 30 days.</div>}

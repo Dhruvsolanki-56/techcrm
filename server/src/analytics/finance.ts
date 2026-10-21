@@ -10,9 +10,9 @@ export function mrr(ctx: AppContext): number {
   return round2(rows.reduce((s, r) => s + (CYCLE_MONTHS[r.cycle] ? r.client_price / (CYCLE_MONTHS[r.cycle] as number) : 0), 0));
 }
 
-/** What the company pays every month for things that renew (subscriptions, hosting, bills …). */
+/** What the COMPANY pays every month for things that renew (subscriptions, hosting, bills …). What a person pays themselves (e.g. a founder's own tool) is not company money and is left out. */
 export function recurringCostPerMonth(ctx: AppContext): number {
-  const rows = ctx.db.prepare("SELECT our_cost, cycle FROM renewals WHERE status='active' AND our_cost>0 AND kind<>'amc'").all() as { our_cost: number; cycle: string }[];
+  const rows = ctx.db.prepare("SELECT our_cost, cycle FROM renewals WHERE status='active' AND our_cost>0 AND kind<>'amc' AND scope='company'").all() as { our_cost: number; cycle: string }[];
   return round2(rows.reduce((s, r) => s + (CYCLE_MONTHS[r.cycle] ? r.our_cost / (CYCLE_MONTHS[r.cycle] as number) : 0), 0));
 }
 
@@ -32,8 +32,8 @@ export function financeSummary(ctx: AppContext, query: { from?: string; to?: str
   const from = query.from && validDate(query.from) ? query.from : `${t.slice(0, 7)}-01`;
   const to = query.to && validDate(query.to) ? query.to : t;
   const inc = one('SELECT COALESCE(SUM(amount),0) cash, COALESCE(SUM(tds),0) tds, COUNT(*) n FROM payments WHERE date BETWEEN ? AND ?', from, to);
-  const exp = one("SELECT COALESCE(SUM(amount),0) v, COALESCE(SUM(tax_amount),0) tax, COUNT(*) n FROM expenses WHERE status='paid' AND date BETWEEN ? AND ?", from, to);
-  const inv = one("SELECT COALESCE(SUM(subtotal-discount),0) taxable, COALESCE(SUM(total),0) total, COALESCE(SUM(tax_amount),0) tax, COUNT(*) n FROM invoices WHERE kind='invoice' AND status NOT IN ('draft','cancelled') AND issue_date BETWEEN ? AND ?", from, to);
+  const exp = one("SELECT COALESCE(SUM(amount),0) v, COUNT(*) n FROM expenses WHERE status='paid' AND date BETWEEN ? AND ?", from, to);
+  const inv = one("SELECT COALESCE(SUM(total),0) total, COUNT(*) n FROM invoices WHERE kind='invoice' AND status NOT IN ('draft','cancelled') AND issue_date BETWEEN ? AND ?", from, to);
   const open = all("SELECT MAX(total-paid_amount,0) bal, due_date FROM invoices WHERE kind='invoice' AND status IN ('sent','partial','overdue')");
   const aging = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
   for (const r of open) {
@@ -74,13 +74,12 @@ export function financeSummary(ctx: AppContext, query: { from?: string; to?: str
     still_to_get: unbilled(ctx),
     trend: months.map((m) => ({ month: m, income: mi[m] || 0, expense: me[m] || 0 })),
     expense_by_category: all("SELECT COALESCE(category,'Uncategorised') k, SUM(amount) v FROM expenses WHERE status='paid' AND date BETWEEN ? AND ? GROUP BY k ORDER BY v DESC", from, to),
-    income_by_client: all("SELECT COALESCE(c.company,'Unassigned') k, SUM(pm.amount) v FROM payments pm LEFT JOIN clients c ON c.id=pm.client_id WHERE pm.date BETWEEN ? AND ? GROUP BY k ORDER BY v DESC LIMIT 8", from, to),
-    projects: all(`SELECT p.id, p.name, c.company client_name, p.status, p.budget,
+    income_by_client: all("SELECT COALESCE(c.company,'Unassigned') k, c.id id, SUM(pm.amount) v FROM payments pm LEFT JOIN clients c ON c.id=pm.client_id WHERE pm.date BETWEEN ? AND ? GROUP BY k ORDER BY v DESC LIMIT 8", from, to),
+    projects: all(`SELECT p.id, p.name, p.client_id, c.company client_name, p.status, p.budget,
       (SELECT COALESCE(SUM(total),0) FROM invoices i WHERE i.project_id=p.id AND i.kind='invoice' AND i.status NOT IN ('draft','cancelled')) invoiced,
       (SELECT COALESCE(SUM(amount),0) FROM payments pm WHERE pm.project_id=p.id) received,
       (SELECT COALESCE(SUM(amount),0) FROM expenses e WHERE e.project_id=p.id AND e.status='paid') cost
       FROM projects p LEFT JOIN clients c ON c.id=p.client_id ORDER BY received DESC, p.id DESC LIMIT 60`),
-    gst: { output: inv.tax, input: exp.tax, net: round2(inv.tax - exp.tax) },
     accounts, cash: round2(accounts.reduce((s, a) => s + a.balance, 0)), founders,
     pending_expenses: one("SELECT COALESCE(SUM(amount),0) v, COUNT(*) n FROM expenses WHERE status='pending'"),
     mrr: mrr(ctx),
@@ -123,7 +122,7 @@ export function financeAnalytics(ctx: AppContext, months = 12): Row {
     expense_by_category: all("SELECT COALESCE(category,'Uncategorised') k, SUM(amount) v FROM expenses WHERE status='paid' AND date>=? GROUP BY k ORDER BY v DESC", first),
     invoice_status: all("SELECT status k, COUNT(*) n, COALESCE(SUM(total),0) total, COALESCE(SUM(MAX(total-paid_amount,0)),0) open FROM invoices WHERE kind='invoice' GROUP BY status ORDER BY n DESC"),
     receivable_clients: all("SELECT c.id, c.company AS name, SUM(MAX(i.total-i.paid_amount,0)) AS owed, MIN(i.due_date) AS oldest_due FROM invoices i JOIN clients c ON c.id=i.client_id WHERE i.kind='invoice' AND i.status IN ('sent','partial','overdue') GROUP BY c.id HAVING owed>0 ORDER BY owed DESC LIMIT 8"),
-    project_profit: all(`SELECT p.id, p.name, p.status, c.company AS client_name,
+    project_profit: all(`SELECT p.id, p.name, p.status, p.client_id, c.company AS client_name,
         p.budget + (SELECT COALESCE(SUM(cr.estimate_amount),0) FROM change_requests cr WHERE cr.project_id=p.id AND cr.billable=1 AND cr.status IN ('approved','in_progress','delivered')) AS value,
         (SELECT COALESCE(SUM(amount),0) FROM payments WHERE project_id=p.id) AS received,
         (SELECT COALESCE(SUM(amount),0) FROM expenses WHERE project_id=p.id AND status='paid') AS cost

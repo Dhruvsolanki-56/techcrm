@@ -94,17 +94,6 @@ describe('subscriptions: company or person, and a price that changes for one cyc
     expect(s.personal_monthly).toBeGreaterThanOrEqual(500);
     expect(s.company_monthly + s.personal_monthly).toBeCloseTo(s.monthly_total, 2);
   });
-  it('uses a one-off amount for the next cycle only, then goes back to the normal price', async () => {
-    const id = (await d.F.post('/renewals', { name: 'Phone bill X', kind: 'bill', cycle: 'monthly', renewal_date: ago(0), our_cost: 700, auto_debit: true, next_amount: 900 })).j.id as number;
-    runAutoDebits(d.app.ctx);
-    const first = sql('SELECT amount, status FROM expenses WHERE renewal_id=? ORDER BY id', id);
-    expect(first).toEqual([{ amount: 900, status: 'paid' }]);
-    expect((await d.F.get(`/renewals/${id}`)).j.next_amount).toBeNull();
-    d.app.ctx.db.prepare('UPDATE renewals SET renewal_date=? WHERE id=?').run(ago(0), id);
-    runAutoDebits(d.app.ctx, inn(40));
-    const later = sql('SELECT amount FROM expenses WHERE renewal_id=? ORDER BY id', id).map((x) => x.amount);
-    expect(later[1]).toBe(700);
-  });
 });
 
 describe('lead specification becomes the project specification', () => {

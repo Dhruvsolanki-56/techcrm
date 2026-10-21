@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { DateInput } from './DateInput';
 import { api, qs, type Row } from '../lib/api';
 import { plural } from '../lib/format';
 import { lookupOptions } from '../forms/Fields';
@@ -29,6 +30,8 @@ interface Props<T> {
   filters?: FilterDef[];
   searchPlaceholder?: string;
   noSearch?: boolean;
+  /** The page already has a Filters button: it decides when this table's filters show on a phone. */
+  filtersOpen?: boolean;
   pageSize?: number;
   defaultSort?: string;
   onRow?(r: T): void;
@@ -58,7 +61,7 @@ export function useDebounced<T>(value: T, ms = 250): T {
 
 /** A server-paginated, searchable, sortable list of any resource. */
 export function DataTable<T extends Row = Row>({
-  resource, query, columns, filters = [], searchPlaceholder = 'Search…', noSearch, pageSize = 25, defaultSort, onRow, toolbar, empty, noun = 'record', noRef, compact, onRows, footer, initialFilters, exportable = true, dates,
+  resource, query, columns, filters = [], searchPlaceholder = 'Search…', noSearch, filtersOpen, pageSize = 25, defaultSort, onRow, toolbar, empty, noun = 'record', noRef, compact, onRows, footer, initialFilters, exportable = true, dates,
 }: Props<T>) {
   const { lookups, isFounder } = useSession();
   const [q, setQ] = useState('');
@@ -89,12 +92,22 @@ export function DataTable<T extends Row = Row>({
     if (!c.sort) return;
     setSort(sk === c.sort ? (sdir === 'desc' ? `${c.sort}:asc` : `${c.sort}:desc`) : `${c.sort}:asc`);
   };
+  const [ownFilters, setShowFilters] = useState(false);
+  const showFilters = filtersOpen ?? ownFilters;
+  const mainKey = columns.find((c) => !(c.cls ?? '').includes('opt') && c.label)?.key;
+  const filterCount = Object.entries(filt).filter(([, v]) => v).length;
   const fopts = (f: FilterDef) => (f.lookup ? lookupOptions(lookups, f.lookup).map((o) => ({ v: String(o.v), l: o.l })) : (f.options ?? []).map((o) => (typeof o === 'string' ? { v: o, l: o } : { v: o[0], l: o[1] })));
 
   return (
     <>
       <div className="toolbar">
         {!noSearch && !compact && <input type="search" placeholder={searchPlaceholder} aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />}
+        {(filters.length > 0 || (dates && !compact)) && !compact && filtersOpen === undefined && (
+          <button type="button" className={`btn tb-filter-btn${filterCount ? ' on' : ''}`} aria-expanded={showFilters} onClick={() => setShowFilters((o) => !o)}>
+            <Icon name="list" />Filters{filterCount ? <span className="tb-count">{filterCount}</span> : null}
+          </button>
+        )}
+        <div className={`tb-filters${showFilters ? ' open' : ''}`}>
         {filters.map((f) => (
           <select key={f.key} aria-label={f.label} value={filt[f.key] ?? ''} onChange={(e) => setFilt((x) => ({ ...x, [f.key]: e.target.value }))}>
             <option value="">{f.label}</option>
@@ -103,10 +116,11 @@ export function DataTable<T extends Row = Row>({
         ))}
         {dates && !compact && (
           <>
-            <label className="inline-sel"><span className="muted small">From</span><input type="date" aria-label="From date" value={filt.from ?? ''} onChange={(e) => setFilt((x) => ({ ...x, from: e.target.value }))} /></label>
-            <label className="inline-sel"><span className="muted small">To</span><input type="date" aria-label="To date" value={filt.to ?? ''} onChange={(e) => setFilt((x) => ({ ...x, to: e.target.value }))} /></label>
+            <label className="inline-sel"><span className="muted small">From</span><DateInput aria-label="From date" value={filt.from ?? ''} onChange={(e) => setFilt((x) => ({ ...x, from: e.target.value }))} /></label>
+            <label className="inline-sel"><span className="muted small">To</span><DateInput aria-label="To date" value={filt.to ?? ''} onChange={(e) => setFilt((x) => ({ ...x, to: e.target.value }))} /></label>
           </>
         )}
+        </div>
         <span className="grow" />
         {isFounder && exportable && !compact && !NO_EXPORT.has(resource) && <ExportMenu path={`/${resource}/export`} params={params} />}
         {toolbar}
@@ -121,7 +135,7 @@ export function DataTable<T extends Row = Row>({
         ) : (
           <>
             <div className="tbl-scroll" tabIndex={0} style={{ opacity: res.isPlaceholderData ? 0.6 : 1, transition: 'opacity .15s' }}>
-              <table className="t">
+              <table className="t cards">
                 <thead>
                   <tr>
                     {cols.map((c) => (
@@ -136,7 +150,7 @@ export function DataTable<T extends Row = Row>({
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.id} className={onRow ? 'click' : ''} onClick={(e) => { if (onRow && !(e.target as HTMLElement).closest('a, button, input, select')) onRow(r); }}>
-                      {cols.map((c) => <td key={c.key} className={`${c.num ? 'num' : ''} ${c.cls ?? ''}`}>{c.render ? c.render(r) : String(r[c.key] ?? '—')}</td>)}
+                      {cols.map((c) => <td key={c.key} data-label={c.label} className={`${c.num ? 'num' : ''} ${c.cls ?? ''}${c.key === mainKey ? ' main' : ''}`}>{c.render ? c.render(r) : String(r[c.key] ?? '—')}</td>)}
                     </tr>
                   ))}
                 </tbody>

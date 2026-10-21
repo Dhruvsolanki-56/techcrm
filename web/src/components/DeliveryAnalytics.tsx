@@ -42,7 +42,7 @@ export function DeliveryAnalytics() {
           <Donut rows={p.by_status.map((s, i) => ({ k: labelOf(PROJECT_STATUSES, s.k), v: s.n, color: STATUS_COLOR[s.k] ?? PALETTE[i % PALETTE.length] as string }))} center={String(p.total)} fmt={(n) => String(n)} />
         </Panel>
         <Panel title="Tasks completed per week" actions={<Legend items={[{ name: 'Done', color: 'var(--green)' }, { name: 'Created', color: 'var(--accent)' }]} />}>
-          <Columns labels={t.weekly.map((w) => fmtDate(w.week).replace(/ \d{4}$/, ''))} series={[{ name: 'Created', values: t.weekly.map((w) => w.created), color: 'var(--accent)' }, { name: 'Done', values: t.weekly.map((w) => w.done), color: 'var(--green)' }]} />
+          <Columns labels={t.weekly.map((w) => fmtDate(w.week))} series={[{ name: 'Created', values: t.weekly.map((w) => w.created), color: 'var(--accent)' }, { name: 'Done', values: t.weekly.map((w) => w.done), color: 'var(--green)' }]} />
         </Panel>
       </div>
       <Panel title="Change requests" actions={<Link to="/change-requests" className="small">Open board →</Link>}>

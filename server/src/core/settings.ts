@@ -3,9 +3,9 @@ import type { Db } from '../db/connection';
 /** Company-wide settings and the dropdown lists (one value per line). */
 export const DEFAULT_SETTINGS = {
   company_name: 'TechSentinals', company_address: '', company_email: '', company_phone: '', company_website: '',
-  gstin: '', pan: '', state: '',
+  pan: '', state: '', default_tds_percent: '0',
   bank_name: '', bank_account_name: '', bank_account_no: '', bank_ifsc: '', upi_id: '',
-  invoice_prefix: 'INV', quote_prefix: 'QUO', default_tax_rate: '18', default_tax_type: 'cgst_sgst',
+  invoice_prefix: 'INV', quote_prefix: 'QUO',
   currency: 'INR', fy_start_month: '4',
   terms_invoice: 'Payment is due by the due date mentioned above. Late payments may attract interest.',
   terms_quote: 'This quotation is valid until the date mentioned above. Work begins after the agreed advance is received.',

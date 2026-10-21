@@ -1,6 +1,6 @@
 import { daysUntil } from '@crm/shared';
 import type { CSSProperties, ReactNode } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { fmtDate, initials } from '../lib/format';
 import { Bell } from '../shell/Bell';
 import { Icon } from './Icon';
@@ -72,7 +72,7 @@ export function Due({ date, done }: { date: unknown; done?: boolean }) {
   const n = daysUntil(String(date).slice(0, 10));
   const cls = done ? '' : n < 0 ? 'late' : n <= 2 ? 'soon' : '';
   const rel = done ? '' : n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n === -1 ? 'Yesterday' : '';
-  return <span className={`due ${cls}`} title={fmtDate(date)}>{rel || fmtDate(date).replace(/ \d{4}$/, '')}</span>;
+  return <span className={`due ${cls}`} title={fmtDate(date)}>{rel || fmtDate(date)}</span>;
 }
 
 export const Ref = ({ value }: { value: unknown }) => (value ? <span className="ref">{String(value)}</span> : null);
@@ -85,11 +85,30 @@ export function ExtLink({ url }: { url?: unknown }) {
 }
 
 /* ---------- layout pieces ---------- */
+/** Back to where you came from; on a page opened directly (a bookmark, a shared link) back goes up one level, and from a top-level screen to Home. */
+export function BackButton() {
+  const nav = useNavigate();
+  const loc = useLocation();
+  if (loc.pathname === '/dashboard' || loc.pathname === '/') return null;
+  const parent = loc.pathname.replace(/\/[^/]+\/?$/, '') || '/dashboard';
+  const target = parent === loc.pathname || parent === '' ? '/dashboard' : parent;
+  return (
+    <button type="button" className="btn sm back-btn" aria-label="Go back" onClick={() => { if (loc.key !== 'default' && window.history.length > 1) nav(-1); else nav(target); }}>
+      <Icon name="arrowL" />Back
+    </button>
+  );
+}
+
 export function PageHeader({ crumbs, actions }: { crumbs: ReactNode; actions?: ReactNode }) {
   return (
     <header className="ph">
+      <BackButton />
       <div className="crumbs">{crumbs}</div>
-      <div className="actions">{actions}{actions ? <span className="bell-sep" aria-hidden="true" /> : null}<Bell /></div>
+      <div className="ph-tools">
+        <button type="button" className="btn icon ghost ph-search" aria-label="Search" onClick={() => window.dispatchEvent(new Event('crm:search'))}><Icon name="search" /></button>
+        <Bell />
+      </div>
+      {actions ? <div className="actions">{actions}</div> : null}
     </header>
   );
 }

@@ -5,7 +5,7 @@ import { Page } from '../ui/Page';
 import { Badge, LogoSq, Who } from '../ui/primitives';
 import { useSession } from '../lib/session';
 import { fmtDate } from '../lib/format';
-import { AddBtn, Amount, editCol } from './common';
+import { AddBtn, Amount, editCol, LinkTo } from './common';
 
 export default function Clients() {
   const { isFounder } = useSession();
@@ -13,7 +13,7 @@ export default function Clients() {
   const cols: Column[] = [
     {
       key: 'company', label: 'Client', sort: 'company',
-      render: (r) => <div className="who"><LogoSq name={r.company} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis">{String(r.company)}</div><div className="t2 ellipsis">{[r.industry, r.city].filter(Boolean).join(' · ')}</div></div></div>,
+      render: (r) => <div className="who"><LogoSq name={r.company} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis"><LinkTo to={`/clients/${String(r.id)}`}>{String(r.company)}</LinkTo></div><div className="t2 ellipsis">{[r.industry, r.city].filter(Boolean).join(' · ')}</div></div></div>,
     },
     { key: 'status', label: 'Status', sort: 'status', render: (r) => <Badge value={r.status} /> },
     { key: 'contact_name', label: 'Main contact', cls: 'opt', render: (r) => <div><div className="t1">{String(r.contact_name ?? '—')}</div><div className="t2">{String(r.contact_phone ?? r.contact_email ?? '')}</div></div> },
@@ -29,7 +29,7 @@ export default function Clients() {
   return (
     <Page title="Clients" sub="Everyone you work for, with their projects and money."
       actions={isFounder ? <><AddBtn resource="clients" label="New client" /></> : undefined}>
-      <DataTable resource="clients" columns={cols} defaultSort="company:asc" searchPlaceholder="Search clients, contacts, GSTIN…" noun="client" onRow={(r) => nav(`/clients/${r.id}`)}
+      <DataTable resource="clients" columns={cols} defaultSort="company:asc" searchPlaceholder="Search clients, contacts…" noun="client" onRow={(r) => nav(`/clients/${r.id}`)}
         filters={[{ key: 'status', label: 'All statuses', options: CLIENT_STATUSES }, { key: 'account_manager_id', label: 'Any manager', lookup: 'users' }]}
         empty={{ title: 'No clients yet', text: 'Convert a lead, or add a client directly.' }} />
     </Page>

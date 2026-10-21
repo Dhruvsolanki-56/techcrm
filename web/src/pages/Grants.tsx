@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Page } from '../ui/Page';
 import { Badge, Kpis, Due } from '../ui/primitives';
-import { AddBtn, Amount, Cell2, editCol} from './common';
+import { AddBtn, Amount, Cell2, editCol, LinkTo } from './common';
 import { money } from '../lib/format';
 
 interface Fin { grants: { requested: number; received: number; n: number }; all_time: { expenses: number } }
@@ -15,7 +15,7 @@ export default function Grants() {
   const fin = useGet<Fin>('/finance/summary');
   const g = fin.data?.grants;
   const cols: Column[] = [
-    { key: 'name', label: 'Grant', sort: 'name', render: (r) => <Cell2 top={String(r.name)} sub={String(r.funder ?? '')} /> },
+    { key: 'name', label: 'Grant', sort: 'name', render: (r) => <Cell2 top={<LinkTo to={`/grants/${String(r.id)}`}>{String(r.name)}</LinkTo>} sub={String(r.funder ?? '')} /> },
     { key: 'status', label: 'Status', render: (r) => <Badge value={r.status} /> },
     { key: 'applied_on', label: 'Applied', cls: 'nowrap opt', render: (r) => fmtDate(r.applied_on) },
     { key: 'requested', label: 'Requested', num: true, sort: 'requested', render: (r) => <Amount v={r.requested} dash /> },

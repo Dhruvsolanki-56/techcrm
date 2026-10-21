@@ -1,5 +1,6 @@
 import { DOC_CATEGORIES } from '@crm/shared';
 import { useQueryClient } from '@tanstack/react-query';
+import { DateInput } from '../ui/DateInput';
 import { useRef, useState } from 'react';
 import { useEditor } from '../forms/RecordEditor';
 import { api, ApiError, type Row } from '../lib/api';
@@ -10,6 +11,9 @@ import { Icon } from '../ui/Icon';
 import { Modal } from '../ui/Modal';
 import { Due, TextStatus } from '../ui/primitives';
 import { useToast } from '../ui/Toasts';
+import { LinkTo } from '../pages/common';
+
+const ENTITY_ROUTE: Record<string, string> = { client: '/clients', project: '/projects', lead: '/leads', invoice: '/invoices', quote: '/quotes', grant: '/grants' };
 
 const INLINE_MIME = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'];
 const fsize = (b: number): string => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
@@ -76,7 +80,7 @@ export function UploadModal({ entityType, entityId, onClose, category }: { entit
         <label className="f full"><span>Title</span><input placeholder={mode === 'link' ? 'e.g. Signed NDA — Acme' : 'Defaults to the file name'} value={f.title} onChange={set('title')} /></label>
         <label className="f"><span>Category</span>
           <select value={f.category} onChange={set('category')}>{DOC_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
-        <label className="f"><span>Expires on</span><input type="date" value={f.expiry_date} onChange={set('expiry_date')} /></label>
+        <label className="f"><span>Expires on</span><DateInput value={f.expiry_date} onChange={set('expiry_date')} /></label>
         <label className="f full"><span>Notes</span><input value={f.notes} onChange={set('notes')} /></label>
       </div>
       {err && <div className="callout err" role="alert" style={{ marginTop: 14 }}>{err}</div>}
@@ -103,7 +107,7 @@ export function useDocColumns(showEntity: boolean): Column[] {
       ),
     },
     { key: 'category', label: 'Category', sort: 'category', render: (r) => <span className="tag">{String(r.category ?? 'Other')}</span> },
-    ...(showEntity ? [{ key: 'entity_name', label: 'Linked to', render: (r: Row) => (r.entity_type === 'general' ? <span className="muted">Company</span> : <><span className="muted">{String(r.entity_type)}</span> {String(r.entity_name ?? '—')}</>) } as Column] : []),
+    ...(showEntity ? [{ key: 'entity_name', label: 'Linked to', render: (r: Row) => (r.entity_type === 'general' ? <span className="muted">Company</span> : <><span className="muted">{String(r.entity_type)}</span> {ENTITY_ROUTE[String(r.entity_type)] && r.entity_id ? <LinkTo to={`${ENTITY_ROUTE[String(r.entity_type)]}/${String(r.entity_id)}`}>{String(r.entity_name ?? '—')}</LinkTo> : String(r.entity_name ?? '—')}</>) } as Column] : []),
     ...(isFounder ? [{ key: 'status', label: 'Status', cls: 'opt', render: (r: Row) => <TextStatus value={r.status} /> } as Column, { key: 'owner_name', label: 'Owner', cls: 'opt', render: (r: Row) => (r.owner_name ? String(r.owner_name) : <span className="faint">—</span>) } as Column] : []),
     { key: 'created_at', label: 'Uploaded', cls: 'nowrap', sort: 'created_at', render: (r) => <>{fmtDate(r.created_at)}<div className="t2">{String(r.uploader_name ?? '')}</div></> },
     {

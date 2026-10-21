@@ -1,3 +1,4 @@
+import { LinkTo } from './common';
 import { LEAD_STAGES, compact, daysUntil } from '@crm/shared';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -5,10 +6,9 @@ import { AttentionRow, useAttention } from '../components/Attention';
 import { TaskModal } from '../components/TaskModal';
 import { useEditor } from '../forms/RecordEditor';
 import { api, type Row } from '../lib/api';
-import { fmtMonth, money, plural } from '../lib/format';
+import { fmtMonth, money, plural, fmtDateTime } from '../lib/format';
 import { useAct, useGet } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import { ago } from '../shell/Bell';
 import { HBars, Legend, LineChart } from '../ui/charts';
 import { Icon } from '../ui/Icon';
 import { Page } from '../ui/Page';
@@ -21,7 +21,7 @@ interface Dash {
     quotes_pending: { n: number; v: number }; unbilled?: { amount: number; projects: number; pending: number; overdue: number; to_get: number; clients: number }; tds?: { deducted: number; claimed: number; to_claim: number }; open_change_requests: { n: number; v: number }; cash: number;
   };
   overdue_invoices?: Row[]; activity?: Row[]; overdue_tasks?: Row[]; pipeline?: Record<string, { n: number; v: number }>; trend?: { month: string; income: number; expense: number }[];
-  team_load?: Row[]; by_client?: { k: string; v: number }[]; spend_by_category?: { k: string; v: number }[]; auto_debits?: Row[]; pending_estimates?: { n: number; v: number };
+  team_load?: Row[]; by_client?: { k: string; v: number; id?: number | null }[]; spend_by_category?: { k: string; v: number }[]; auto_debits?: Row[]; pending_estimates?: { n: number; v: number };
   work?: { clients: { n: number; active: number }; projects: { k: string; n: number }[]; invoices: { n: number; total: number; open: number } }; change_requests?: Row[];
 }
 
@@ -56,7 +56,7 @@ function Overview() {
   const tr = d.trend ?? [];
 
   const attention = (
-    <Panel title="Needs attention" actions={<Link to="/actions">{attn.data ? `See all ${attn.data.total}` : 'See all'}</Link>} bodyClass="flush">
+    <Panel title="Needs attention" actions={attn.data?.total ? <Link to="/actions">{`See all ${attn.data.total}`}</Link> : undefined} bodyClass="flush">
       {attn.data?.items.length ? <div className="list">{attn.data.items.slice(0, 8).map((i) => <AttentionRow key={i.key} i={i} />)}</div>
         : <div className="empty mini iconic"><span className="em-i"><Icon name="check" /></span><span>Nothing is overdue or waiting on you. Good place to be.</span></div>}
     </Panel>
@@ -100,7 +100,7 @@ function Overview() {
       <Kpis items={[
         { label: 'Collected this month', value: money(k.month_income), sub: `Spent ${money(k.month_expense)}` },
         { label: 'Net this month', value: money(net), tone: net < 0 ? 'bad' : undefined, sub: 'Collected − spent' },
-        { label: 'Still to get', value: money(k.unbilled?.to_get ?? 0), tone: k.unbilled?.to_get ? 'warn' : 'good', sub: k.unbilled?.overdue ? <span className="neg">{money(k.unbilled.overdue)} overdue</span> : k.unbilled?.to_get ? `From ${plural(k.unbilled.clients, 'client')}` : 'Everything is paid', to: '/analytics?tab=receivables' },
+        { label: 'Still to get', value: money(k.unbilled?.to_get ?? 0), tone: k.unbilled?.to_get ? 'warn' : 'good', sub: k.unbilled?.overdue ? <span className="neg">{money(k.unbilled.overdue)} overdue</span> : k.unbilled?.to_get ? `From ${plural(k.unbilled.clients, 'client')}` : 'Nothing to collect', to: '/analytics?tab=receivables' },
         { label: 'Open pipeline', value: money(k.open_leads.v), sub: plural(k.open_leads.n, 'open deal'), to: '/leads' },
         { label: 'Cash in bank', value: money(k.cash), sub: `${money(k.mrr)}/mo maintenance income`, to: '/finance?tab=accounts' },
       ]} />
@@ -109,7 +109,7 @@ function Overview() {
         { label: 'Open change requests', value: k.open_change_requests.n, sub: `${money(k.open_change_requests.v)} estimated`, to: '/change-requests' },
         { label: 'Quotations out', value: k.quotes_pending.n, sub: money(k.quotes_pending.v), to: '/quotes' },
         { label: 'Running cost / month', value: money(k.recurring_cost), to: '/renewals' },
-        { label: 'Bills to confirm', value: d.pending_estimates?.n ?? 0, sub: d.pending_estimates?.n ? `${money(d.pending_estimates.v)} estimated` : 'None', tone: d.pending_estimates?.n ? 'warn' : undefined, to: '/finance?tab=expenses' },
+        ...(d.pending_estimates?.n ? [{ label: 'Bills to confirm', value: d.pending_estimates?.n ?? 0, sub: d.pending_estimates?.n ? `${money(d.pending_estimates.v)} estimated` : 'None', tone: 'warn' as const, to: '/finance?tab=expenses' }] : []),
       ]} />
       <div className="dash">
         <div className="dash-row">
@@ -127,7 +127,7 @@ function Overview() {
               <div className="tbl-scroll" tabIndex={0}><table className="t"><tbody>
                 {d.my_projects.map((p) => (
                   <tr key={p.id} className="click" onClick={() => nav(`/projects/${p.id}`)}>
-                    <td><div className="who"><LogoSq name={p.name} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis">{String(p.name)}</div><div className="t2 ellipsis">{String(p.client_name ?? '')}</div></div></div></td>
+                    <td><div className="who"><LogoSq name={p.name} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis"><LinkTo to={`/projects/${p.id}`}>{String(p.name)}</LinkTo></div><div className="t2 ellipsis">{p.client_id ? <LinkTo to={`/clients/${p.client_id}`}>{String(p.client_name ?? '')}</LinkTo> : String(p.client_name ?? '')}</div></div></div></td>
                     <td><Badge value={p.status} /></td>
                     <td><div className="prog"><div className="bar"><i style={{ width: `${Number(p.task_count) ? Math.round((100 * Number(p.tasks_done)) / Number(p.task_count)) : 0}%` }} /></div>{Number(p.task_count) ? `${Math.round((100 * Number(p.tasks_done)) / Number(p.task_count))}%` : '—'}</div></td>
                     <td className="num">{Number(p.cr_open) ? <span className="tag amber" title="Open change requests">{String(p.cr_open)} CR</span> : null}</td>
@@ -145,7 +145,7 @@ function Overview() {
           </Panel>
         </div>
         <div className="dash-row">
-          <Panel title="Revenue by client" actions={<Link to="/clients">All clients</Link>}><HBars rows={d.by_client ?? []} fmt={compact} /></Panel>
+          <Panel title="Revenue by client" actions={<Link to="/clients">All clients</Link>}><HBars rows={(d.by_client ?? []).map((c) => ({ ...c, to: c.id ? `/clients/${c.id}` : undefined }))} fmt={compact} /></Panel>
           <Panel title="Where the money goes" actions={<Link to="/finance">Finance</Link>}><HBars rows={d.spend_by_category ?? []} fmt={compact} accent /></Panel>
         </div>
         <div className="dash-row">
@@ -166,7 +166,7 @@ function Overview() {
         <Panel title="Recent activity" actions={<Link to="/audit">Full log</Link>} bodyClass="flush">
           {d.activity?.length ? (
             <div className="list act-grid">{d.activity.slice(0, 8).map((a) => (
-              <div className="act" key={a.id}><Avatar name={a.user_name ?? '?'} size="sm" /><div className="grow ellipsis" title={String(a.detail ?? '')}><b>{String(a.user_name ?? 'System').split(' ')[0]}</b> <span className="x">{a.action === 'create' ? 'added' : a.action === 'update' ? 'updated' : a.action === 'delete' ? 'deleted' : String(a.action)} {String(a.entity ?? '').replace(/_/g, ' ').replace(/s$/, '')}</span> {String(a.detail ?? '')}</div><span className="w">{ago(a.at)}</span></div>
+              <div className="act" key={a.id}><Avatar name={a.user_name ?? '?'} size="sm" /><div className="grow ellipsis" title={String(a.detail ?? '')}><b>{String(a.user_name ?? 'System').split(' ')[0]}</b> <span className="x">{a.action === 'create' ? 'added' : a.action === 'update' ? 'updated' : a.action === 'delete' ? 'deleted' : String(a.action)} {String(a.entity ?? '').replace(/_/g, ' ').replace(/s$/, '')}</span> {String(a.detail ?? '')}</div><span className="w">{fmtDateTime(a.at)}</span></div>
             ))}</div>
           ) : <div className="empty mini">Nothing yet.</div>}
         </Panel>

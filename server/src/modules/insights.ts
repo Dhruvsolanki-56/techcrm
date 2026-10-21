@@ -61,7 +61,7 @@ export function insightRoutes(ctx: AppContext, engine: Engine): express.Router {
         deduction_rate: e.rate, section: e.tds_section ?? '', status: label(e.tds_status), claimed_on: e.tds_claimed_on ?? '',
       }));
       const note = `TDS report${r.fy ? ` · FY ${String(r.fy)}` : ''} · deducted ₹${(r.totals as { deducted: number }).deducted} · claimed ₹${(r.totals as { claimed: number }).claimed}`;
-      const out = fmt === 'xlsx' ? await toXlsx('TDS', rows as Row[], note) : await toPdf('TDS report', 'tds', rows as Row[], note);
+      const out = fmt === 'xlsx' ? await toXlsx('TDS report', rows as Row[], note, 'tds', user(req).name) : await toPdf('TDS report', 'tds', rows as Row[], note, user(req).name);
       res.setHeader('Content-Type', fmt === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="tds-${today()}.${fmt}"`);
       res.send(out);
@@ -97,6 +97,8 @@ export function insightRoutes(ctx: AppContext, engine: Engine): express.Router {
     if (isFounder(u)) {
       [w, p] = between('i.due_date');
       push(engine.query('invoices', u, `i.status IN ('sent','partial','overdue') AND ${w}`, p, 500), (r) => ({ date: r.due_date, type: 'invoice', title: `Invoice due: ${r.number}`, sub: `${r.client_name} · ₹${round2(r.total - r.paid_amount).toLocaleString('en-IN')}`, link: `/invoices/${r.id}` }));
+      [w, p] = between('ms.due_date');
+      push(engine.query('milestones', u, `ms.invoice_id IS NULL AND ${w}`, p, 300), (r) => ({ date: r.due_date, type: 'milestone', title: `Raise invoice: ${r.title}`, sub: `${r.project_name} · ₹${round2(r.amount).toLocaleString('en-IN')}`, link: `/projects/${r.project_id}?tab=finance` }));
       [w, p] = between('q.valid_until');
       push(engine.query('quotes', u, `q.status='sent' AND ${w}`, p, 200), (r) => ({ date: r.valid_until, type: 'quote', title: `Quote expires: ${r.number}`, sub: r.client_name || r.lead_name, link: `/quotes/${r.id}` }));
       [w, p] = between('g.next_report_date');
@@ -163,7 +165,7 @@ export function insightRoutes(ctx: AppContext, engine: Engine): express.Router {
       if (req.query.action) { where += ' AND action=?'; p.push(String(req.query.action)); }
       if (req.query.entity) { where += ' AND entity=?'; p.push(String(req.query.entity)); }
       const rows = db.prepare(`SELECT at, user_name, action, entity, entity_id, detail, ip FROM audit_log WHERE ${where} ORDER BY id DESC LIMIT 20000`).all(...p) as Row[];
-      const out = fmt === 'xlsx' ? await toXlsx('Activity log', rows) : await toPdf('Activity log', 'audit', rows);
+      const out = fmt === 'xlsx' ? await toXlsx('Activity log', rows, undefined, 'audit', user(req).name) : await toPdf('Activity log', 'audit', rows, undefined, user(req).name);
       res.setHeader('Content-Type', fmt === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="activity-log-${today()}.${fmt}"`);
       res.send(out);

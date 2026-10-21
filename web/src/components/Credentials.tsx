@@ -8,6 +8,7 @@ import { Modal, useDialogs } from '../ui/Modal';
 import { Empty, LoadFailed } from '../ui/primitives';
 import { useToast } from '../ui/Toasts';
 import { ExtLink } from '../ui/primitives';
+import { ClientLink, ProjectLink } from '../pages/common';
 
 interface Cred extends Row { label: string; kind: string | null; url: string | null; username: string | null; notes: string | null; has_password: boolean; has_secret: boolean; client_name: string | null; project_name: string | null; client_id: number | null; project_id: number | null }
 
@@ -70,7 +71,7 @@ export function CredentialsPanel({ client_id, project_id, q }: { client_id?: num
             <div className="li" key={c.id} style={{ alignItems: 'flex-start' }}>
               <div className="grow">
                 <div className="t"><b>{c.label}</b> {c.kind && <span className="tag">{c.kind}</span>}</div>
-                <div className="s">{[c.client_name, c.project_name].filter(Boolean).join(' · ')}</div>
+                <div className="s">{c.client_name ? <ClientLink id={c.client_id} name={c.client_name} /> : null}{c.client_name && c.project_name ? ' · ' : ''}{c.project_name ? <ProjectLink id={c.project_id} name={c.project_name} /> : null}</div>
                 <div className="small" style={{ marginTop: 4, display: 'grid', gap: 2 }}>
                   {c.url && <div><ExtLink url={c.url} /></div>}
                   {c.username && <div>User: <span className="mono">{c.username}</span> <button type="button" className="btn ghost sm icon" aria-label="Copy username" onClick={() => void copy(c.username as string)}><Icon name="copy" /></button></div>}

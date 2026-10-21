@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api, qs, type Row } from './api';
@@ -24,8 +25,9 @@ export function useRecord<T extends Row = Row>(resource: string, id: string | nu
 export function useAct<A = void, R = unknown>(fn: (a: A) => Promise<R>, ok?: string | ((r: R) => string), after?: (r: R) => void) {
   const qc = useQueryClient();
   const toast = useToast();
-  return useMutation({
-    mutationFn: fn,
+  const busy = useRef(false);
+  const m = useMutation({
+    mutationFn: async (a: A) => { busy.current = true; try { return await fn(a); } finally { busy.current = false; } },
     onSuccess: async (r) => {
       await qc.invalidateQueries();
       const msg = typeof ok === 'function' ? ok(r) : ok;
@@ -33,7 +35,13 @@ export function useAct<A = void, R = unknown>(fn: (a: A) => Promise<R>, ok?: str
       after?.(r);
     },
     onError: (e) => toast.fail(e),
+    onSettled: () => { busy.current = false; },
   });
+  // a double click (or Enter twice) must never run the same action twice: while one is running, further calls are ignored
+  const guard = useRef(m.mutate);
+  guard.current = m.mutate;
+  const mutate = useCallback(((...args: Parameters<typeof m.mutate>) => { if (busy.current) return; busy.current = true; guard.current(...args); }) as typeof m.mutate, []);
+  return { ...m, mutate };
 }
 
 export function useRefresh() {

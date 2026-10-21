@@ -11,7 +11,7 @@ import { forbidden, HttpError } from '../shared/errors';
 import { hasFlag, isFounder } from '../security/permissions';
 import { projectScope, visibleProjectIds } from '../domain/access';
 import { projectCode, purgeEntity } from '../domain/entities';
-import { CR_VALUE_SQL, PM_COLUMNS } from '../domain/projectMoney';
+import { ADVANCE_SQL, ADVANCE_STATE_SQL, CR_VALUE_SQL, PM_COLUMNS } from '../domain/projectMoney';
 import { STATUS_LABEL, taskKey } from '../domain/tasks';
 import type { ResourceDeps } from './deps';
 
@@ -27,10 +27,10 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
     table: 'projects', alias: 'p', timestamps: true,
     label: (r) => r.name,
     fields: {
-      client_id: 'i', name: 't', code: 't', type: 't', status: 't', priority: 't', start_date: 'd', deadline: 'd', completed_on: 'd', budget: 'n', manager_id: 'i', assigned_name: 't',
+      client_id: 'i', name: 't', code: 't', type: 't', status: 't', priority: 't', start_date: 'd', deadline: 'd', completed_on: 'd', budget: 'n', tds_percent: 'n', advance_required: 'b', manager_id: 'i', assigned_name: 't',
       description: 't', specs: 't', tech_stack: 't', live_url: 't', staging_url: 't', repo_url: 't', design_url: 't',
     },
-    required: ['name'], notNull: ['status', 'priority'], enums: { status: values(PROJECT_STATUSES), priority: values(PRIORITIES) },
+    required: ['name', 'client_id'], notNull: ['status', 'priority'], enums: { status: values(PROJECT_STATUSES), priority: values(PRIORITIES) },
     columns: `p.*, c.company AS client_name, u.name AS manager_name,
       (SELECT COUNT(*) FROM tasks t WHERE t.project_id=p.id) AS task_count,
       (SELECT COUNT(*) FROM tasks t WHERE t.project_id=p.id AND t.status='done') AS tasks_done,
@@ -44,17 +44,22 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
         + (SELECT COALESCE(SUM(x.amount),0) FROM payments x WHERE x.project_id=p.id AND x.invoice_id IS NULL) AS total_billed,
       (SELECT COALESCE(SUM(x.amount),0) FROM payments x WHERE x.project_id=p.id) AS total_received,
       (SELECT COALESCE(SUM(e.amount),0) FROM expenses e WHERE e.project_id=p.id AND e.status='paid') AS total_expenses,
-      ${PM_COLUMNS}`,
+      ${PM_COLUMNS},
+      (SELECT COUNT(*) FROM milestones m WHERE m.project_id=p.id) AS milestone_count,
+      ${ADVANCE_SQL} AS advance_amount, ${ADVANCE_STATE_SQL} AS advance_state`,
     from: 'FROM projects p LEFT JOIN clients c ON c.id=p.client_id LEFT JOIN users u ON u.id=p.manager_id',
-    founderCols: ['budget', 'total_billed', 'total_received', 'total_expenses', 'cr_value', 'revised_value', 'tds_total', 'to_invoice', 'pending_amount', 'to_get'],
+    founderCols: ['budget', 'total_billed', 'total_received', 'total_expenses', 'cr_value', 'revised_value', 'tds_total', 'to_invoice', 'pending_amount', 'to_get', 'tds_percent', 'advance_amount', 'advance_state', 'milestone_count'],
     search: ['p.name', 'p.code', 'p.type', 'p.tech_stack', 'p.description', 'p.live_url', 'c.company', 'u.name'],
     filters: { client_id: 'p.client_id', status: 'p.status', manager_id: 'p.manager_id', type: 'p.type' },
     sortable: { name: 'p.name COLLATE NOCASE', status: 'p.status', deadline: "COALESCE(p.deadline,'9999')", created_at: 'p.created_at', client_name: 'c.company COLLATE NOCASE', budget: 'p.budget', id: 'p.id' },
     order: 'p.created_at DESC, p.id DESC',
     scope: (u) => projectScope(ctx, u, 'p.id'),
     can: (u) => isFounder(u),
-    before(op, d) {
+    before(op, d, ex, { body }) {
+      if (op === 'update' && ex?.code) delete d.code; // a project code never changes
       if (d.status === 'completed' && !d.completed_on) d.completed_on = today();
+      // TDS is optional: a new project starts from the company's default (0 unless set), and a project that never has TDS just stays at 0
+      if (op === 'create' && (body.tds_percent === undefined || body.tds_percent === '' || body.tds_percent === null)) d.tds_percent = Number(ctx.settings.get().default_tds_percent) || 0;
     },
     after(op, row) {
       if (op === 'create' && !row.code) db.prepare('UPDATE projects SET code=? WHERE id=?').run(projectCode(row.id), row.id);
@@ -226,17 +231,21 @@ export function deliveryResources(deps: ResourceDeps): Record<string, ResourceDe
       if (op === 'create' && d.status === 'estimated' && !(Number(d.estimate_amount) > 0 || Number(d.estimate_hours) > 0)) d.status = 'requested';
     },
     after(op, row, ex, { user }) {
+      // The change request's own page shows every field change in its history, so only the project timeline gets a line.
       const note = (text: string): void => {
-        db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('change_request',?,?,'system',?)").run(row.id, user.id, text);
         db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('project',?,?,'system',?)").run(row.project_id, user.id, `CR-${String(row.id).padStart(4, '0')} — ${text}`);
       };
       if (op === 'create') {
         note(`Change request raised (${row.phase === 'after_delivery' ? 'after delivery' : 'before delivery'}): ${row.title}`);
         const mgr = one('SELECT manager_id FROM projects WHERE id=?', row.project_id);
         if (mgr?.manager_id && mgr.manager_id !== user.id) ctx.notify(mgr.manager_id, `New change request on ${row.project_name}: ${row.title}`, `/projects/${row.project_id}?tab=changes`);
-      } else if (ex && ex.status !== row.status) {
-        note(`Status: ${String(ex.status).replace(/_/g, ' ')} → ${String(row.status).replace(/_/g, ' ')}`);
       }
+    },
+    beforeDelete(id) {
+      const q = one("SELECT number FROM quotes WHERE change_request_id=? AND status<>'rejected' LIMIT 1", id);
+      const i = one("SELECT number FROM invoices WHERE change_request_id=? AND status<>'cancelled' LIMIT 1", id);
+      if (i) throw new HttpError(409, `Invoice ${String(i.number)} was raised for this change request, so it cannot be deleted. Cancel the invoice first, or set the request to Cancelled.`);
+      if (q) throw new HttpError(409, `Quotation ${String(q.number)} was written for this change request. Reject or delete the quotation first, or set the request to Cancelled.`);
     },
     onDelete: (id) => {
       db.prepare('UPDATE tasks SET change_request_id=NULL WHERE change_request_id=?').run(id);

@@ -18,6 +18,7 @@ import { settingsRoutes } from './modules/settings';
 import { userRoutes } from './modules/users';
 import { vaultRoutes } from './modules/vault';
 import { buildResources } from './resources';
+import { setExportBrand } from './modules/exporters';
 
 export interface BuiltApp {
   app: Express;
@@ -65,6 +66,7 @@ export function createApp(ctx: AppContext): BuiltApp {
 
   const secured = express.Router();
   secured.use(requireUser(ctx), passwordChangeGate);
+  setExportBrand(() => { const s = ctx.settings.get(); return { company: String(s.company_name || 'TechSentinals CRM'), logo: s.logo ? String(s.logo) : undefined }; });
   const { lookups, settings } = settingsRoutes(ctx, engine);
   secured.use(accountRoutes(ctx));
   secured.use('/users', userRoutes(ctx));

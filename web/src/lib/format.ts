@@ -1,15 +1,12 @@
-import { asDate, daysUntil, labelOf, money, today, type Option } from '@crm/shared';
+import { daysUntil, dmy, dmyTime, labelOf, money, today, type Option } from '@crm/shared';
 
 export { money, labelOf, today };
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** 2026-08-30 → 30 Aug 2026 */
+/** 2026-01-21 → 21 Jan 2026 (one date format everywhere) */
 export function fmtDate(s: unknown): string {
   if (!s) return '—';
-  const str = String(s).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return String(s);
-  const d = asDate(str);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return dmy(s);
 }
 export const fmtMonth = (m: string): string => `${MONTHS[Number(m.slice(5, 7)) - 1] ?? m} ${m.slice(2, 4)}`;
 
@@ -23,12 +20,8 @@ export function relDay(s: unknown): string {
   return n > 0 ? `in ${n} days` : `${-n} days ago`;
 }
 
-export function fmtDateTime(s: unknown): string {
-  if (!s) return '';
-  const d = new Date(String(s).replace(' ', 'T') + (String(s).includes('Z') || String(s).includes('+') ? '' : 'Z'));
-  if (Number.isNaN(d.getTime())) return String(s);
-  return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-}
+/** 21 Jan 2026, 01:30 PM in the viewer's own time */
+export const fmtDateTime = (s: unknown): string => dmyTime(s);
 
 export const initials = (name: unknown): string =>
   String(name ?? '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || '?';

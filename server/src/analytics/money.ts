@@ -107,7 +107,7 @@ export function receivables(ctx: AppContext): Row {
   const projects: Row[] = (db.prepare(`SELECT p.id, p.code, p.name, p.status, p.client_id, c.company client_name, p.budget,
       (${CR_VALUE_SQL}) cr_value, ${PM_SQL.value} value, ${PM_SQL.tds} tds, ${PM_SQL.cash} cash, ${PM_SQL.pending} pending, ${PM_SQL.overdue} overdue,
       (SELECT COALESCE(SUM(i.total),0) FROM invoices i WHERE i.project_id=p.id AND i.kind='invoice' AND i.status NOT IN ('draft','cancelled')) invoiced,
-      MAX(0, ${PM_SQL.value} - ${PM_SQL.tds} - ${PM_SQL.invoiced}) to_invoice
+      MAX(0, ${PM_SQL.value} - ${PM_SQL.tds_eff} - ${PM_SQL.invoiced}) to_invoice
     FROM projects p LEFT JOIN clients c ON c.id=p.client_id WHERE p.status<>'cancelled' ORDER BY p.id DESC`).all() as Row[]).map((p) => ({
     ...p, value: round2(p.value), received: round2(p.cash), cash: round2(p.cash), tds: round2(p.tds), invoiced: round2(p.invoiced), pending: round2(p.pending), overdue: round2(p.overdue),
     unbilled: round2(p.to_invoice), to_get: round2(p.to_invoice + p.pending),
@@ -171,9 +171,9 @@ export function subscriptions(ctx: AppContext): Row {
   const items = db.prepare(`SELECT r.*, COALESCE(u.name, r.assigned_name) owner_name,
       ROUND(r.our_cost / CASE r.cycle WHEN 'monthly' THEN 1 WHEN 'quarterly' THEN 3 WHEN 'half-yearly' THEN 6 WHEN 'yearly' THEN 12 WHEN 'biennial' THEN 24 WHEN 'triennial' THEN 36 ELSE NULL END, 2) monthly
     FROM renewals r LEFT JOIN users u ON u.id=r.owner_id WHERE r.status='active' AND r.kind<>'amc' ORDER BY r.our_cost DESC`).all() as Row[];
-  const sumBy = (key: (r: Row) => string): Row[] => {
+  const sumBy = (key: (r: Row) => string, only: 'company' | 'personal' = 'company'): Row[] => {
     const m = new Map<string, number>();
-    for (const r of items) m.set(key(r), round2((m.get(key(r)) ?? 0) + (r.monthly ?? 0)));
+    for (const r of items.filter((x) => x.scope === only)) m.set(key(r), round2((m.get(key(r)) ?? 0) + (r.monthly ?? 0)));
     return [...m].map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount);
   };
   const months = lastMonths(12);
@@ -186,7 +186,7 @@ export function subscriptions(ctx: AppContext): Row {
     items, monthly_total: round2(items.reduce((s, r) => s + (r.monthly ?? 0), 0)),
     company_monthly: round2(items.filter((r) => r.scope === 'company').reduce((s, r) => s + (r.monthly ?? 0), 0)),
     personal_monthly: round2(items.filter((r) => r.scope === 'personal').reduce((s, r) => s + (r.monthly ?? 0), 0)),
-    by_kind: sumBy((r) => String(r.kind)), by_owner: sumBy((r) => String(r.owner_name ?? 'Company')), by_vendor: sumBy((r) => String(r.vendor ?? r.name)),
+    by_kind: sumBy((r) => String(r.kind)), by_owner: sumBy((r) => String(r.owner_name ?? 'Someone else'), 'personal'), by_vendor: sumBy((r) => String(r.vendor ?? r.name)),
     next_30: items.filter((r) => r.renewal_date && r.renewal_date <= addDays(t, 30)).map((r) => ({ id: r.id, name: r.name, date: r.renewal_date, amount: r.next_amount ?? r.our_cost, scope: r.scope, auto: !!r.auto_debit })),
     history,
   };
@@ -204,7 +204,7 @@ export function tdsReport(ctx: AppContext, q: Q): Row {
   if (fy) { const r = fyRange(fy); where.push('pm.date BETWEEN ? AND ?'); p.push(r.from, r.to); }
   if (status) { where.push('pm.tds_status=?'); p.push(status); }
   if (intOr(q.client_id)) { where.push('pm.client_id=?'); p.push(intOr(q.client_id)); }
-  const entries = db.prepare(`SELECT pm.id, pm.date, pm.amount, pm.tds, pm.tds_status, pm.tds_section, pm.tds_claimed_on, pm.client_id, c.company client_name, pm.project_id, p.name project_name, i.number invoice_number
+  const entries = db.prepare(`SELECT pm.id, pm.date, pm.amount, pm.tds, pm.tds_status, pm.tds_section, pm.tds_claimed_on, pm.client_id, c.company client_name, pm.project_id, p.name project_name, i.id invoice_id, i.number invoice_number
     FROM payments pm LEFT JOIN clients c ON c.id=pm.client_id LEFT JOIN projects p ON p.id=pm.project_id LEFT JOIN invoices i ON i.id=pm.invoice_id
     WHERE ${where.join(' AND ')} ORDER BY pm.date DESC, pm.id DESC LIMIT 2000`).all(...p) as Row[];
   type TdsRow = Row & { fy: string; gross: number; rate: number };

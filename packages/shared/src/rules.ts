@@ -30,7 +30,6 @@ export const RULES: Record<string, Rule> = {
   phone: { re: /^\+?[0-9][0-9 ()-]*$/, block: /[^0-9+ ()-]/g, max: 20, digits: [7, 15], msg: 'must be a phone number: digits only, e.g. +91 98765 43210', hint: 'Digits only', inputmode: 'tel' },
   email: { re: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, max: 160, msg: 'is not a valid email address (e.g. name@company.com)', inputmode: 'email' },
   url: { re: /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(:\d+)?([/?#].*)?$/i, max: 300, msg: 'is not a valid web address (e.g. company.com)', inputmode: 'url' },
-  gstin: { re: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, block: /[^0-9A-Za-z]/g, upper: true, max: 15, msg: 'must be 15 characters, e.g. 27ABCDE1234F1Z5' },
   pan: { re: /^[A-Z]{5}[0-9]{4}[A-Z]$/, block: /[^0-9A-Za-z]/g, upper: true, max: 10, msg: 'must be 10 characters, e.g. ABCDE1234F' },
   ifsc: { re: /^[A-Z]{4}0[A-Z0-9]{6}$/, block: /[^0-9A-Za-z]/g, upper: true, max: 11, msg: 'must be 11 characters, e.g. HDFC0001234' },
   upi: { re: /^[\w.-]{2,}@[a-zA-Z]{2,}$/, max: 60, msg: 'must look like name@bank' },
@@ -45,22 +44,22 @@ export const RULES: Record<string, Rule> = {
 /** Which rule each field follows, per resource (table name). */
 export const FIELD_RULES: Record<string, Record<string, string>> = {
   leads: { name: 'words', email: 'email', phone: 'phone', city: 'words', country: 'place', website: 'url', value: 'money' },
-  clients: { website: 'url', gstin: 'gstin', pan: 'pan', city: 'place', state: 'place', country: 'place', contact_name: 'person', contact_email: 'email', contact_phone: 'phone' },
+  clients: { website: 'url', pan: 'pan', city: 'place', state: 'place', country: 'place', contact_name: 'person', contact_email: 'email', contact_phone: 'phone' },
   contacts: { name: 'person', email: 'email', phone: 'phone', whatsapp: 'phone' },
-  projects: { budget: 'money', live_url: 'url', staging_url: 'url', repo_url: 'url', design_url: 'url' },
+  projects: { budget: 'money', tds_percent: 'percent', live_url: 'url', staging_url: 'url', repo_url: 'url', design_url: 'url' },
   payments: { amount: 'money', tds: 'money' },
-  expenses: { amount: 'money', tax_amount: 'money' },
+  expenses: { amount: 'money' },
   accounts: { opening_balance: 'signedMoney' },
   transfers: { amount: 'money' },
   renewals: { our_cost: 'money', client_price: 'money' },
   maintenance_logs: { hours: 'hours' },
-  invoices: { discount: 'money', tax_rate: 'percent', number: 'digitsText' },
-  quotes: { discount: 'money', tax_rate: 'percent', number: 'digitsText' },
+  invoices: { discount: 'money', number: 'digitsText' },
+  quotes: { discount: 'money', number: 'digitsText' },
   change_requests: { estimate_hours: 'hours', estimate_amount: 'money' },
   users: { name: 'person', email: 'email', phone: 'phone' },
   settings: {
-    company_email: 'email', company_phone: 'phone', company_website: 'url', gstin: 'gstin', pan: 'pan', state: 'place',
-    bank_account_name: 'person', bank_ifsc: 'ifsc', upi_id: 'upi', bank_account_no: 'digitsText', default_tax_rate: 'percent',
+    company_email: 'email', company_phone: 'phone', company_website: 'url', pan: 'pan', state: 'place',
+    bank_account_name: 'person', bank_ifsc: 'ifsc', upi_id: 'upi', bank_account_no: 'digitsText', default_tds_percent: 'percent',
   },
 };
 

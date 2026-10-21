@@ -80,9 +80,49 @@ describe('quotation → project', () => {
     expect(after.project_id).toBe(project.id);
     expect((await d.F.post(`/quotes/${q.id}/start-project`)).s).toBe(400); // only once
   });
-  it('needs a client first', async () => {
-    const q = (await d.F.post('/quotes', { lead_id: d.leads.hot ?? Object.values(d.leads)[0], title: 'Lead quote', items: [{ description: 'x', qty: 1, rate: 1000 }] })).j;
-    expect((await d.F.post(`/quotes/${q.id}/start-project`)).s).toBe(400);
+  it('accepting a quotation of a lead makes the client, the project and moves the lead — and the first payment converts it', async () => {
+    const lead = (await d.F.post('/leads', { company: 'Flow Co', name: 'Farah Khan', phone: '+91 98111 22233', stage: 'proposal', specs: 'Pages: home, about.' })).j;
+    const q = (await d.F.post('/quotes', { lead_id: lead.id, title: 'Flow site', items: [{ description: 'Site', qty: 1, rate: 80000 }] })).j;
+    // a second quotation for the same lead stays untouched
+    const other = (await d.F.post('/quotes', { lead_id: lead.id, title: 'Flow app', items: [{ description: 'App', qty: 1, rate: 50000 }] })).j;
+    const r = await d.F.put(`/quotes/${q.id}`, { status: 'accepted' });
+    expect(r.s).toBe(200);
+    expect(r.j.project_id).toBeTruthy();
+    const l = (await d.F.get(`/leads/${lead.id}`)).j;
+    expect(l).toMatchObject({ stage: 'accepted', client_id: r.j.client_id });
+    const client = (await d.F.get(`/clients/${l.client_id}`)).j;
+    expect(client).toMatchObject({ company: 'Flow Co', status: 'prospect' });
+    expect(((await d.F.get(`/contacts?client_id=${client.id}`)).j as { name: string }[])[0]?.name).toBe('Farah Khan');
+    const proj = (await d.F.get(`/projects/${r.j.project_id}`)).j;
+    expect(proj).toMatchObject({ budget: 80000, status: 'planning', client_id: client.id });
+    expect(proj.specs).toContain('Pages: home');
+    expect((await d.F.get(`/quotes/${other.id}`)).j).toMatchObject({ status: 'draft', client_id: client.id, project_id: null });
+    // accepting again, or by another route, changes nothing
+    expect((await d.F.put(`/quotes/${q.id}`, { status: 'accepted', notes: 'again' })).j.project_id).toBe(r.j.project_id);
+    expect(((await d.F.get('/projects?limit=500')).j as { name: string }[]).filter((p) => p.name === 'Flow site')).toHaveLength(1);
+    // the first payment: prospect → client, lead → converted
+    const inv = (await d.F.post('/invoices', { client_id: client.id, project_id: proj.id, status: 'sent', items: [{ description: 'Advance', qty: 1, rate: 30000 }] })).j;
+    await d.F.post('/payments', { invoice_id: inv.id, amount: 30000, date: ago(0) });
+    expect((await d.F.get(`/clients/${client.id}`)).j.status).toBe('active');
+    expect((await d.F.get(`/leads/${lead.id}`)).j.stage).toBe('won');
+    // a second quotation of the same lead can be accepted later and becomes its own project for the same client
+    const r2 = await d.F.put(`/quotes/${other.id}`, { status: 'accepted' });
+    expect(r2.j.project_id).not.toBe(r.j.project_id);
+    expect((await d.F.get(`/projects/${r2.j.project_id}`)).j.client_id).toBe(client.id);
+    expect((await d.F.get(`/leads/${lead.id}`)).j.stage).toBe('won'); // an already converted lead stays converted
+  });
+  it('invoicing a lead quotation makes the client without a project; a rejected one can do neither', async () => {
+    const lead = (await d.F.post('/leads', { company: 'Invoice Only Co', name: 'Ira Roy', stage: 'proposal' })).j;
+    const q = (await d.F.post('/quotes', { lead_id: lead.id, title: 'One-off', items: [{ description: 'Logo', qty: 1, rate: 5000 }] })).j;
+    const inv = await d.F.post(`/quotes/${q.id}/to-invoice`);
+    expect(inv.s).toBe(200);
+    expect((await d.F.get(`/leads/${lead.id}`)).j.stage).toBe('accepted');
+    expect((await d.F.get(`/quotes/${q.id}`)).j.project_id).toBeNull();
+    const lead2 = (await d.F.post('/leads', { company: 'Nope Co', name: 'Nitin Das', stage: 'proposal' })).j;
+    const q2 = (await d.F.post('/quotes', { lead_id: lead2.id, title: 'No', items: [{ description: 'x', qty: 1, rate: 100 }] })).j;
+    await d.F.put(`/quotes/${q2.id}`, { status: 'rejected' });
+    expect((await d.F.post(`/quotes/${q2.id}/start-project`)).s).toBe(400);
+    expect((await d.F.get(`/leads/${lead2.id}`)).j.stage).toBe('proposal');
   });
   it('moves the lead to "Proposal Sent" when its quotation is sent', async () => {
     const lead = (await d.F.post('/leads', { company: 'Proposal Test Co', stage: 'contacted' })).j;

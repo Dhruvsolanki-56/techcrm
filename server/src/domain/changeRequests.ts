@@ -9,7 +9,6 @@ export function changeRequestOfQuote(ctx: AppContext, quote: Row): Row | undefin
 }
 
 function note(ctx: AppContext, cr: Row, userId: number | null, text: string): void {
-  ctx.db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('change_request',?,?,'system',?)").run(cr.id, userId, text);
   ctx.db.prepare("INSERT INTO notes(entity_type,entity_id,user_id,kind,body) VALUES('project',?,?,'system',?)").run(cr.project_id, userId, `CR-${String(cr.id).padStart(4, '0')} — ${text}`);
 }
 

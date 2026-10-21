@@ -5,6 +5,7 @@ import { fmtDate, fmtMonth, money } from '../lib/format';
 import { useGet } from '../lib/hooks';
 import { Columns, Donut, HBars, Legend, LineChart, PALETTE } from '../ui/charts';
 import { Badge, Due, ErrorBox, Kpis, Panel } from '../ui/primitives';
+import { ClientLink } from '../pages/common';
 
 interface FA {
   series: { month: string; income: number; expense: number; net: number; invoiced: number; margin: number | null; cumulative: number }[];
@@ -66,12 +67,12 @@ export function FinanceAnalytics() {
       <Panel title="Project profitability" bodyClass="flush">
         <div className="tbl-scroll" tabIndex={0}><table className="t rep">
           <thead><tr><th>Project</th><th>Status</th><th className="num">Value incl. changes</th><th className="num">Received</th><th className="num">Costs</th><th className="num">Profit</th></tr></thead>
-          <tbody>{d.project_profit.map((p) => <tr key={p.id}><td><Link to={`/projects/${p.id}`}><b>{String(p.name)}</b></Link><div className="t2">{String(p.client_name ?? '')}</div></td><td><Badge value={p.status} /></td><td className="num">{money(p.value)}</td><td className="num">{money(p.received)}</td><td className="num">{money(p.cost)}</td><td className={`num ${p.margin < 0 ? 'neg' : ''}`}>{money(p.margin)}</td></tr>)}</tbody></table></div>
+          <tbody>{d.project_profit.map((p) => <tr key={p.id}><td><Link to={`/projects/${p.id}`}><b>{String(p.name)}</b></Link><div className="t2"><ClientLink id={p.client_id} name={p.client_name} /></div></td><td><Badge value={p.status} /></td><td className="num">{money(p.value)}</td><td className="num">{money(p.received)}</td><td className="num">{money(p.cost)}</td><td className={`num ${p.margin < 0 ? 'neg' : ''}`}>{money(p.margin)}</td></tr>)}</tbody></table></div>
       </Panel>
       {d.grants.length > 0 && (
         <Panel title="Grants" actions={<Link to="/grants" className="small">Open →</Link>} bodyClass="flush">
           <div className="tbl-scroll" tabIndex={0}><table className="t rep"><thead><tr><th>Grant</th><th>Status</th><th className="num">Requested</th><th className="num">Received</th><th className="num">Used</th><th className="num">Left to use</th></tr></thead>
-            <tbody>{d.grants.map((g) => <tr key={g.id}><td><b>{String(g.name)}</b><div className="t2">{String(g.funder ?? '')}</div></td><td><Badge value={g.status} /></td><td className="num">{money(g.requested)}</td><td className="num">{money(g.received)}</td><td className="num">{money(g.used)}</td><td className={`num ${g.remaining < 0 ? 'neg' : ''}`}>{money(g.remaining)}</td></tr>)}</tbody></table></div>
+            <tbody>{d.grants.map((g) => <tr key={g.id}><td><Link to={`/grants/${g.id}`}><b>{String(g.name)}</b></Link><div className="t2">{String(g.funder ?? '')}</div></td><td><Badge value={g.status} /></td><td className="num">{money(g.requested)}</td><td className="num">{money(g.received)}</td><td className="num">{money(g.used)}</td><td className={`num ${g.remaining < 0 ? 'neg' : ''}`}>{money(g.remaining)}</td></tr>)}</tbody></table></div>
         </Panel>
       )}
       <div className="dash-row">

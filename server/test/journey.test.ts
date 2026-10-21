@@ -168,19 +168,23 @@ describe('4. maintenance plan and subscriptions', () => {
     const log = await F.post('/maintenance_logs', { title: 'Menu page slow', project_id: S.project, type: 'bug', status: 'resolved', billable: false, hours: 2, reported_on: t });
     expect(log.s).toBe(201);
   });
-  it('a company subscription debits itself once; a personal one is only tracked; a one-off price is used once', async () => {
-    const co = (await F.post('/renewals', { kind: 'subscription', name: 'Claude', scope: 'company', renewal_date: t, cycle: 'monthly', our_cost: 2399, auto_debit: true, pay_account_id: S.bank })).j;
-    const me = (await F.post('/renewals', { kind: 'subscription', name: 'Founder phone plan', scope: 'person', renewal_date: t, cycle: 'monthly', our_cost: 700, auto_debit: true })).j;
+  it('what the company pays debits itself once, as an expense; what someone else pays is only listed; a different bill is fixed on the expense', async () => {
+    const co = (await F.post('/renewals', { kind: 'subscription', name: 'Claude', scope: 'company', renewal_date: t, cycle: 'monthly', our_cost: 2399, pay_account_id: S.bank })).j;
+    const me = (await F.post('/renewals', { kind: 'subscription', name: 'ChatGPT paid by Vansh', scope: 'personal', owner_id: 1, renewal_date: t, cycle: 'monthly', our_cost: 2000 })).j;
+    expect(co.auto_debit).toBe(1); // no switch to tick: company items always debit
+    expect(me.auto_debit).toBe(0);
     const spent = (id: number) => (sql<{ n: number }>('SELECT COUNT(*) n FROM expenses WHERE renewal_id=?', id)).n;
     expect(spent(co.id)).toBe(1);
     expect(spent(me.id)).toBe(0);
     expect(runAutoDebits(app.ctx, t)).toHaveLength(0); // never twice
-    await F.put(`/renewals/${co.id}`, { next_amount: 3000 });
     runAutoDebits(app.ctx, addDays(t, 40));
-    const amounts = (app.ctx.db.prepare('SELECT amount FROM expenses WHERE renewal_id=? ORDER BY date').all(co.id) as { amount: number }[]).map((r) => r.amount);
-    expect(amounts).toEqual([2399, 3000]);
+    const rows = app.ctx.db.prepare('SELECT id, amount FROM expenses WHERE renewal_id=? ORDER BY date').all(co.id) as { id: number; amount: number }[];
+    expect(rows.map((r) => r.amount)).toEqual([2399, 2399]);
+    // this month's bill was different: correct that expense; the subscription itself is unchanged
+    await F.put(`/expenses/${(rows[1] as { id: number }).id}`, { amount: 2500 });
+    expect((await F.get(`/renewals/${co.id}`)).j.our_cost).toBe(2399);
     runAutoDebits(app.ctx, addDays(t, 75));
-    expect((app.ctx.db.prepare('SELECT amount FROM expenses WHERE renewal_id=? ORDER BY date').all(co.id) as { amount: number }[]).map((r) => r.amount)).toEqual([2399, 3000, 2399]); // back to the normal price
+    expect((app.ctx.db.prepare('SELECT amount FROM expenses WHERE renewal_id=? ORDER BY date').all(co.id) as { amount: number }[]).map((r) => r.amount)).toEqual([2399, 2500, 2399]);
     const subs = (await F.get('/analytics/subscriptions')).j;
     expect(JSON.stringify(subs)).toContain('Claude');
   });
@@ -248,11 +252,11 @@ describe('6b. "still to get" is one number, the same on every screen', () => {
   it('equals pending + not invoiced for the project, the client, the totals, the dashboard, the project page and the clients list', async () => {
     const p2 = (await F.post('/projects', { client_id: S.client, name: 'Orbit Foods App', status: 'active', budget: 40000 })).j.id;
     await F.post('/payments', { project_id: p2, client_id: S.client, amount: 9000, tds: 1000, date: t, account_id: S.bank }); // paid with no invoice at all
-    const inv3 = (await F.post('/invoices', { client_id: S.client, project_id: p2, title: 'App part', status: 'sent', issue_date: t, due_date: addDays(t, 10), items: JSON.stringify([{ description: 'App part', qty: 1, rate: 10000 }]), tax_type: 'cgst_sgst', tax_rate: 18 })).j;
-    expect(inv3.total).toBe(11800); // GST is on top, and is never counted as "agreed value"
+    const inv3 = (await F.post('/invoices', { client_id: S.client, project_id: p2, title: 'App part', status: 'sent', issue_date: t, due_date: addDays(t, 10), items: JSON.stringify([{ description: 'App part', qty: 1, rate: 10000 }]) })).j;
+    expect(inv3.total).toBe(10000); // no tax is ever added
     const row = await proj(p2);
     // value 40,000 − TDS 1,000 − (invoiced 10,000 before GST + 9,000 received without invoice) = 20,000 not invoiced; 11,800 invoiced and unpaid
-    expect(row).toMatchObject({ value: 40000, tds: 1000, pending: 11800, unbilled: 20000, to_get: 31800 });
+    expect(row).toMatchObject({ value: 40000, tds: 1000, pending: 10000, unbilled: 20000, to_get: 30000 });
     const r = await rec();
     const c = r.clients.find((x: { client_id: number }) => x.client_id === S.client);
     expect(c.to_get).toBeCloseTo(r.projects.filter((x: { client_id: number }) => x.client_id === S.client).reduce((a: number, x: { to_get: number }) => a + x.to_get, 0), 2);
@@ -261,12 +265,12 @@ describe('6b. "still to get" is one number, the same on every screen', () => {
     expect(dash.to_get).toBe(Math.round(r.totals.to_get));
     expect(dash.pending).toBe(Math.round(r.totals.pending));
     const page = (await F.get(`/projects/${p2}`)).j;
-    expect(page).toMatchObject({ to_get: 31800, to_invoice: 20000, pending_amount: 11800, tds_total: 1000 });
+    expect(page).toMatchObject({ to_get: 30000, to_invoice: 20000, pending_amount: 10000, tds_total: 1000 });
     const list = (await F.get('/clients?limit=50')).j.find((x: { id: number }) => x.id === S.client);
     expect(list.to_get).toBeCloseTo(c.to_get, 2);
     // the remaining money arrives: nothing left to get
     await F.put(`/invoices/${inv3.id}`, { status: 'sent' });
-    await F.post('/payments', { invoice_id: inv3.id, amount: 11800, date: t });
+    await F.post('/payments', { invoice_id: inv3.id, amount: 10000, date: t });
     await F.post('/payments', { project_id: p2, client_id: S.client, amount: 20000, date: t });
     expect(await proj(p2)).toMatchObject({ pending: 0, unbilled: 0, to_get: 0 });
   });
@@ -344,5 +348,171 @@ describe('7. everything stays editable and reversible, and the figures follow', 
     expect(f.income.cash).toBeCloseTo(got, 2);
     const stale = sql<{ n: number }>("SELECT COUNT(*) n FROM invoices i WHERE ABS(i.paid_amount - COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id=i.id),0)) > 0.005").n;
     expect(stale).toBe(0);
+  });
+});
+
+describe('8. tranches: custom percentages, TDS ratio on every payment, advance before work starts', () => {
+  let p = 0;
+  let adv = 0;
+  it('takes your own percentages (must total 100) and a TDS rate for the project', async () => {
+    p = (await F.post('/projects', { client_id: S.client, name: 'Tranche Co Portal', status: 'planning', budget: 200000 })).j.id;
+    expect((await F.post(`/projects/${p}/schedule`, { percents: [30, 30, 30] })).s).toBe(400);
+    expect((await F.post(`/projects/${p}/schedule`, { percents: [30, 0, 70] })).s).toBe(400);
+    const r = await F.post(`/projects/${p}/schedule`, { percents: [25, 25, 50], tds_percent: 10 });
+    expect(r.s).toBe(200);
+    expect(r.j.map((m: { amount: number }) => m.amount)).toEqual([50000, 50000, 100000]);
+    expect(r.j.map((m: { kind: string }) => m.kind)).toEqual(['advance', 'milestone', 'final']);
+    expect((await F.get(`/projects/${p}`)).j.tds_percent).toBe(10);
+    adv = r.j[0].id;
+  });
+  it('"still to get" already leaves out the TDS the client will deduct', async () => {
+    expect(await proj(p)).toMatchObject({ value: 200000, unbilled: 180000, to_get: 180000 });
+  });
+  it('an advance invoice is net of TDS, and the payment follows the same ratio on its own', async () => {
+    const inv = (await F.post(`/milestones/${adv}/invoice`)).j.invoice_id;
+    const i = (await F.get(`/invoices/${inv}`)).j;
+    expect(i).toMatchObject({ total: 45000, expected_tds: 5000, tax_type: 'none' });
+    expect(i.notes).toMatch(/TDS/);
+    await F.put(`/invoices/${inv}`, { status: 'sent' });
+    const pay = (await F.post('/payments', { invoice_id: inv, amount: 45000, date: t, account_id: S.bank })).j;
+    expect(pay.tds).toBe(5000); // not typed by anyone
+    expect((await F.get(`/invoices/${inv}`)).j).toMatchObject({ status: 'paid', balance: 0 });
+    expect(await proj(p)).toMatchObject({ invoiced: 45000, received: 45000, tds: 5000, unbilled: 135000, to_get: 135000 });
+    const typed = (await F.post('/payments', { invoice_id: inv, amount: 1, tds: 0, date: t })).j;
+    expect(typed.tds).toBe(0); // typing a TDS amount (even 0) always wins
+    await F.del(`/payments/${typed.id}`);
+  });
+  it('a change request on the same project follows the same ratio when its quotation becomes an invoice', async () => {
+    const cr = (await F.post('/change_requests', { project_id: p, title: 'Extra module', billable: true, estimate_amount: 20000 })).j;
+    await F.post(`/change-requests/${cr.id}/quote`);
+    const quote = (await F.get(`/change_requests/${cr.id}`)).j.quote_id;
+    await F.put(`/quotes/${quote}`, { status: 'sent' });
+    const inv = (await F.post(`/quotes/${quote}/to-invoice`)).j.invoice_id;
+    expect((await F.get(`/invoices/${inv}`)).j).toMatchObject({ total: 18000, expected_tds: 2000 });
+    // a second click gives back the same invoice — never a duplicate
+    const again = await F.post(`/quotes/${quote}/to-invoice`);
+    expect(again.j).toMatchObject({ invoice_id: inv, existing: true });
+    expect(((await F.get(`/invoices?change_request_id=${cr.id}`)).j as unknown[]).length).toBe(1);
+    const dupe = await F.post('/invoices', { client_id: S.client, project_id: p, change_request_id: cr.id, quote_id: quote, items: [{ description: 'x', qty: 1, rate: 1 }] });
+    expect(dupe.s).toBe(409);
+  });
+  it('warns when work starts before the advance is paid, and stops warning once it is', async () => {
+    const q = (await F.post('/projects', { client_id: S.client, name: 'Eager Co Site', status: 'planning', budget: 100000 })).j.id;
+    await F.post(`/projects/${q}/schedule`, { template: '50-50' });
+    const titles = async () => (await F.get('/attention')).j.items.map((i: { title: string }) => i.title);
+    expect((await titles()).some((x: string) => x.includes('advance is not paid: Eager Co Site'))).toBe(false); // still planning: fine
+    await F.put(`/projects/${q}`, { status: 'active' });
+    expect((await titles()).some((x: string) => x.includes('advance is not paid: Eager Co Site'))).toBe(true);
+    expect((await F.get(`/projects/${q}`)).j).toMatchObject({ advance_state: 'unpaid', advance_amount: 50000 });
+    await F.put(`/projects/${q}`, { advance_required: false });
+    expect((await titles()).some((x: string) => x.includes('advance is not paid: Eager Co Site'))).toBe(false);
+    await F.put(`/projects/${q}`, { advance_required: true });
+    const ms = (await F.get(`/milestones?project_id=${q}`)).j[0];
+    const inv = (await F.post(`/milestones/${ms.id}/invoice`)).j.invoice_id;
+    await F.put(`/invoices/${inv}`, { status: 'sent' });
+    await F.post('/payments', { invoice_id: inv, amount: 50000, date: t });
+    expect((await F.get(`/projects/${q}`)).j.advance_state).toBe('paid');
+    expect((await titles()).some((x: string) => x.includes('advance is not paid: Eager Co Site'))).toBe(false);
+  });
+});
+
+describe('8b. a payment form that leaves TDS blank still follows the invoice ratio', () => {
+  it('treats a blank TDS box as "not typed", but 0 as a real answer', async () => {
+    const q = (await F.post('/projects', { client_id: S.client, name: 'Blank Box Co', status: 'planning', budget: 100000 })).j.id;
+    await F.post(`/projects/${q}/schedule`, { template: 'full', tds_percent: 10 });
+    const ms = (await F.get(`/milestones?project_id=${q}`)).j[0];
+    const inv = (await F.post(`/milestones/${ms.id}/invoice`)).j.invoice_id;
+    await F.put(`/invoices/${inv}`, { status: 'sent' });
+    const a = (await F.post('/payments', { invoice_id: inv, amount: 45000, tds: '', date: t })).j;
+    expect(a.tds).toBe(5000); // half of the ₹90,000 invoice is paid, so half of its ₹10,000 TDS
+    await F.del(`/payments/${a.id}`);
+    expect((await F.post('/payments', { invoice_id: inv, amount: 45000, tds: 0, date: t })).j.tds).toBe(0);
+  });
+});
+
+describe('9. nothing is ever created twice by a double click', () => {
+  it('sending the same new record twice in a moment returns the first one; a different one is still created', async () => {
+    const body = { date: t, amount: 777, client_id: S.client, category: 'Client payment', notes: 'double click' };
+    const [a, b] = await Promise.all([F.post('/payments', body), F.post('/payments', body)]);
+    expect(a.j.id).toBe(b.j.id);
+    expect((sql<{ n: number }>("SELECT COUNT(*) n FROM payments WHERE notes='double click'")).n).toBe(1);
+    const c = await F.post('/payments', { ...body, amount: 778 });
+    expect(c.j.id).not.toBe(a.j.id);
+  });
+  it('a cancelled milestone invoice frees its payment to be invoiced again, and the schedule re-plans it', async () => {
+    const q = (await F.post('/projects', { client_id: S.client, name: 'Cancel Co', status: 'planning', budget: 60000 })).j.id;
+    await F.post(`/projects/${q}/schedule`, { template: '50-50' });
+    const ms = (await F.get(`/milestones?project_id=${q}`)).j[0];
+    const inv = (await F.post(`/milestones/${ms.id}/invoice`)).j.invoice_id;
+    expect((await F.post(`/milestones/${ms.id}/invoice`)).s).toBe(400);
+    await F.put(`/invoices/${inv}`, { status: 'cancelled' });
+    expect((await F.get(`/milestones/${ms.id}`)).j.state).toBe('planned');
+    const again = await F.post(`/milestones/${ms.id}/invoice`);
+    expect(again.s).toBe(201);
+    expect(again.j.invoice_id).not.toBe(inv);
+    await F.put(`/invoices/${again.j.invoice_id}`, { status: 'cancelled' });
+    const re = (await F.post(`/projects/${q}/schedule`, { template: '40-30-30' })).j as { amount: number }[];
+    expect(re.reduce((s, m) => s + m.amount, 0)).toBeCloseTo(60000, 2);
+  });
+});
+
+describe('10. TDS is optional and dynamic — and there is no GST anywhere', () => {
+  it('a project without TDS bills the full amount; one payment can still carry its own TDS; another can opt out', async () => {
+    const a = (await F.post('/projects', { client_id: S.client, name: 'No TDS Co', status: 'planning', budget: 100000 })).j;
+    expect(a.tds_percent).toBe(0);
+    const sch = (await F.post(`/projects/${a.id}/schedule`, { template: '50-50' })).j;
+    const full = (await F.post(`/milestones/${sch[0].id}/invoice`)).j.invoice_id;
+    expect((await F.get(`/invoices/${full}`)).j).toMatchObject({ total: 50000, expected_tds: 0 });
+    // this one payment has 10% TDS even though the project has none
+    const second = (await F.post(`/milestones/${sch[1].id}/invoice`, { tds_percent: 10 })).j.invoice_id;
+    expect((await F.get(`/invoices/${second}`)).j).toMatchObject({ total: 45000, expected_tds: 5000 });
+    expect((await F.get(`/milestones/${sch[1].id}`)).j.tds_percent).toBe(10);
+    for (const i of [full, second]) await F.put(`/invoices/${i}`, { status: 'sent' }); // drafts are not counted until sent
+    expect(await proj(a.id)).toMatchObject({ value: 100000, invoiced: 95000, unbilled: 0, to_get: 95000 });
+    // and a project with TDS can opt a payment out
+    const b = (await F.post('/projects', { client_id: S.client, name: 'Mostly TDS Co', status: 'planning', budget: 100000, tds_percent: 10 })).j;
+    const s2 = (await F.post(`/projects/${b.id}/schedule`, { template: '50-50' })).j;
+    const none = (await F.post(`/milestones/${s2[0].id}/invoice`, { tds_percent: 0 })).j.invoice_id;
+    expect((await F.get(`/invoices/${none}`)).j).toMatchObject({ total: 50000, expected_tds: 0 });
+    expect((await F.post(`/milestones/${s2[1].id}/invoice`, { tds_percent: 150 })).s).toBe(400);
+    await F.put(`/invoices/${none}`, { status: 'sent' });
+    expect(await proj(b.id)).toMatchObject({ invoiced: 50000, unbilled: 45000 }); // the other half still expects 10% TDS
+  });
+  it('a hand-written invoice can name the TDS it expects, and the payment follows it', async () => {
+    const inv = (await F.post('/invoices', { client_id: S.client, title: 'By hand', status: 'sent', issue_date: t, due_date: addDays(t, 9), items: JSON.stringify([{ description: 'x', qty: 1, rate: 9000 }]), expected_tds: 1000 })).j;
+    const pay = (await F.post('/payments', { invoice_id: inv.id, amount: 9000, date: t })).j;
+    expect(pay.tds).toBe(1000);
+    expect((await F.get(`/invoices/${inv.id}`)).j.status).toBe('paid');
+  });
+  it('the company default TDS applies to new projects, and a settings change takes effect at once', async () => {
+    expect((await F.call('PUT', '/settings', { default_tds_percent: 10 })).s).toBe(200);
+    expect((await F.post('/projects', { client_id: S.client, name: 'Default TDS Co', status: 'planning', budget: 1000 })).j.tds_percent).toBe(10);
+    expect((await F.post('/projects', { client_id: S.client, name: 'Explicit Zero Co', status: 'planning', budget: 1000, tds_percent: 0 })).j.tds_percent).toBe(0);
+    expect((await F.call('PUT', '/settings', { default_tds_percent: 500 })).s).toBeGreaterThanOrEqual(400);
+    await F.call('PUT', '/settings', { default_tds_percent: 0 });
+  });
+  it('GST cannot sneak in: tax fields are ignored, and no settings or screens mention it', async () => {
+    const inv = (await F.post('/invoices', { client_id: S.client, title: 'Taxy', items: JSON.stringify([{ description: 'x', qty: 2, rate: 500 }]), tax_type: 'igst', tax_rate: 18 })).j;
+    expect(inv).toMatchObject({ total: 1000, tax_amount: 0, tax_type: 'none', tax_rate: 0 });
+    const settings = (await F.get('/settings')).j;
+    expect(Object.keys(settings).filter((k) => /gst|tax/i.test(k))).toEqual([]);
+    const fin = (await F.get('/finance/summary')).j;
+    expect(fin.gst).toBeUndefined();
+  });
+});
+
+describe('11. a deleted record leaves nothing behind for the next one that gets its id', () => {
+  it('the next record created after a deletion starts with a clean history, notes and files', async () => {
+    const a = (await F.post('/leads', { company: 'Ghost Co', stage: 'new' })).j;
+    await F.put(`/leads/${a.id}`, { stage: 'contacted' });
+    await F.post('/notes', { entity_type: 'lead', entity_id: a.id, body: 'secret pricing' });
+    await F.post('/documents/link', { entity_type: 'lead', entity_id: a.id, url: 'https://x.example/doc', title: 'Ghost doc' });
+    expect((await F.del(`/leads/${a.id}`)).s).toBeLessThan(300);
+    expect(sql<{ n: number }>("SELECT COUNT(*) n FROM history WHERE entity='leads' AND entity_id=?", a.id).n).toBe(0);
+    const b = (await F.post('/leads', { company: 'Fresh Co', stage: 'new' })).j;
+    const h = (await F.get(`/history?entity=leads&entity_id=${b.id}`)).j as { action: string }[];
+    expect(h.map((x) => x.action)).toEqual(['create']);
+    expect(((await F.get(`/notes?entity_type=lead&entity_id=${b.id}`)).j as unknown[]).length).toBe(0);
+    expect(((await F.get(`/documents?entity_type=lead&entity_id=${b.id}`)).j as unknown[]).length).toBe(0);
   });
 });

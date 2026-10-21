@@ -44,7 +44,7 @@ test('sign out, wrong password is refused, then sign in again', async () => {
 });
 
 test('lead → contact log → convert to client with a project', async () => {
-  await page.goto('/leads');
+  await page.goto('/leads?view=board');
   await page.getByRole('button', { name: 'New lead' }).click();
   await page.getByLabel('Company (optional)').fill('Sunrise Dental Clinic');
   await page.getByLabel('Contact person').fill('Dr Meera Shah');
@@ -86,7 +86,7 @@ test('change request → quotation → accepted → invoice → payment, all lin
   await expect(page).toHaveURL(/\/quotes\/\d+/);
   await expect(page.locator('.sheet')).toContainText('Add online appointment booking');
   await page.getByRole('button', { name: 'Mark as sent' }).click();
-  await page.getByRole('button', { name: 'Accepted', exact: true }).click();
+  await page.getByRole('button', { name: 'Client accepted', exact: true }).click();
   await page.getByRole('button', { name: 'Convert to invoice' }).click();
   await expect(page).toHaveURL(/\/invoices\/\d+/);
   await expect(page.locator('.sheet')).toContainText('Add online appointment booking');
@@ -144,7 +144,9 @@ test('payment schedule: split the value, mark finished, raise the invoice; the a
   const proj = await api('POST', '/projects', { client_id: clients[0].id, name: 'Schedule Demo Portal', status: 'active', budget: 100000 });
   await page.goto(`/projects/${proj.id}?tab=finance`);
   await expect(page.getByRole('heading', { name: 'Payment schedule' })).toBeVisible();
-  await page.getByLabel('Set a payment schedule').selectOption({ label: '50% advance, 50% on delivery' });
+  await page.getByRole('button', { name: 'Plan the payments' }).click();
+  await page.getByRole('dialog').getByLabel('Quick fill').selectOption({ label: '50% advance, 50% on delivery' });
+  await page.getByRole('dialog').getByRole('button', { name: 'Save schedule' }).click();
   await expect(page.locator('tbody tr', { hasText: 'Advance' })).toContainText('₹50,000');
   await expect(page.locator('tfoot')).toContainText('Matches the agreed value');
   await page.locator('tbody tr', { hasText: 'Advance' }).getByRole('button', { name: 'Mark finished' }).click();
@@ -222,20 +224,28 @@ test('every record keeps its history, files and an editable status', async () =>
   void clients;
 });
 
-test('mobile layout: menu opens, no sideways scrolling', async () => {
+test('mobile layout: app-like tab bar, no sideways scrolling, tables become cards', async () => {
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const url of ['/dashboard', '/leads?view=list', '/projects', '/finance', '/invoices']) {
+  for (const url of ['/dashboard', '/actions', '/leads?view=list', '/projects', '/finance', '/analytics', '/invoices', '/tasks', '/settings']) {
     await page.goto(url);
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(600);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(over, `${url} overflows`).toBeLessThanOrEqual(2);
   }
-  await page.getByRole('button', { name: 'Menu' }).click();
+  const tabs = page.getByRole('navigation', { name: 'Quick tabs' });
+  await expect(tabs).toBeVisible();
+  await tabs.getByRole('link', { name: 'Projects' }).click();
+  await expect(page).toHaveURL(/\/projects/);
+  await tabs.getByRole('button', { name: 'More' }).click();
   await page.locator('.side a', { hasText: 'Clients' }).click();
   await expect(page).toHaveURL(/\/clients/);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(tabs).toBeHidden();
 });
 
 test('accessibility: no serious or critical violations on key screens', async () => {
+  test.setTimeout(150_000); // eight screens, each loaded and audited
   await page.setViewportSize({ width: 1280, height: 800 });
   for (const url of ['/dashboard', '/actions', '/analytics?tab=receivables', '/analytics?tab=spending', '/leads?view=list', '/projects', '/invoices', '/finance']) {
     await page.goto(url);

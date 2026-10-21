@@ -11,7 +11,7 @@ export function normalizeItems(items: unknown): LineItem[] {
   }
   if (!Array.isArray(list)) list = [];
   return (list as Record<string, unknown>[])
-    .map((it) => ({ description: String(it.description ?? '').slice(0, 1000), hsn: String(it.hsn ?? '').slice(0, 20), qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 }))
+    .map((it) => ({ description: String(it.description ?? '').slice(0, 1000), qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 }))
     .filter((it) => it.description || it.qty || it.rate)
     .map((it, i) => {
       if (!(it.qty > 0) || it.qty > 1e7) throw new HttpError(400, `Line ${i + 1}: quantity must be more than 0.`);
@@ -51,7 +51,8 @@ export function refreshInvoice(ctx: AppContext, id: number | null | undefined): 
   if (!inv) return;
   const paid = (ctx.db.prepare('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE invoice_id=?').get(id) as { s: number }).s;
   let status: string = inv.status;
-  if (status !== 'draft' && status !== 'cancelled') {
+  // a client who pays a draft has, in fact, been billed: money in makes it a real (sent / part-paid / paid) invoice
+  if (status === 'cancelled') { /* stays cancelled */ } else if (status !== 'draft' || paid > 0) {
     if (inv.total > 0 && paid >= inv.total - 0.005) status = 'paid';
     else if (paid > 0) status = 'partial';
     else status = 'sent';
@@ -75,9 +76,8 @@ export function documentBefore(ctx: AppContext, table: 'invoices' | 'quotes', pr
     if (op === 'create') {
       d.created_by = actor.user.id;
       d.issue_date ||= today();
-      if (d.tax_rate === undefined || d.tax_rate === null) d.tax_rate = Number(s.default_tax_rate) || 0;
-      // a company with no GSTIN is not charging GST
-      d.tax_type ||= s.gstin ? s.default_tax_type : 'none';
+      d.tax_type = 'none'; // (old columns, kept for history) — this company never charges GST
+      d.tax_rate = 0;
       d.currency ||= s.currency;
       d.terms ||= s[termsKey];
       if (table === 'invoices' && !d.due_date) {
@@ -91,17 +91,16 @@ export function documentBefore(ctx: AppContext, table: 'invoices' | 'quotes', pr
         d.valid_until = x.toISOString().slice(0, 10);
       }
     }
+    if (op === 'update' && ex?.number) delete d.number; // a document number never changes
     if (!d.number && (op === 'create' || (ex && !ex.number))) {
       const pfx = table === 'invoices' && (d.kind || ex?.kind) === 'proforma' ? 'PI' : s[prefixKey];
       d.number = nextNumber(ctx, table, pfx, d.issue_date || ex?.issue_date);
     }
-    if (d.items !== undefined || d.discount !== undefined || d.tax_rate !== undefined || d.tax_type !== undefined || op === 'create') {
+    if (d.items !== undefined || d.discount !== undefined || op === 'create') {
       const items = normalizeItems(d.items !== undefined ? JSON.parse(d.items) : ex ? ex.items : []);
       const discount = d.discount !== undefined ? d.discount : ex ? ex.discount : 0;
-      const taxRate = d.tax_rate !== undefined ? d.tax_rate : ex ? ex.tax_rate : 0;
-      const taxType = d.tax_type !== undefined ? d.tax_type : ex ? ex.tax_type : 'none';
       d.items = JSON.stringify(items);
-      Object.assign(d, computeTotals(items, discount, taxRate, taxType));
+      Object.assign(d, computeTotals(items, discount));
     }
   };
 }

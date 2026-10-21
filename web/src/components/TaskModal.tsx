@@ -4,16 +4,16 @@ import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useEditor } from '../forms/RecordEditor';
 import { api, qs, type Row } from '../lib/api';
-import { fmtDate, plural } from '../lib/format';
+import { fmtDate, plural, fmtDateTime } from '../lib/format';
 import { useAct } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import { ago } from '../shell/Bell';
 import { Icon } from '../ui/Icon';
 import { Modal, useDialogs } from '../ui/Modal';
 import { Avatar, AvatarStack, Badge, Due, Priority, pretty, Who } from '../ui/primitives';
 import { useToast } from '../ui/Toasts';
 import { DocsPanel } from './Docs';
 import { Prop } from './record';
+import { ClientLink, ProjectLink } from '../pages/common';
 
 export const taskKey = (id: unknown): string => `T-${id}`;
 interface Person { id: number; name: string; title?: string | null; role?: string }
@@ -36,7 +36,7 @@ function Checklist({ taskId, people, canEdit, collab }: { taskId: number; people
           <div key={c.id} className={`ck ${c.done ? 'done' : ''}`}>
             <button type="button" className="ck-box" disabled={!canEdit} aria-pressed={!!c.done} aria-label={`${c.done ? 'Mark not done' : 'Mark done'}: ${String(c.text)}`}
               onClick={() => void run(() => api.put(`/tasks/${taskId}/checklist/${c.id}`, { done: !c.done }))}><Icon name="check" /></button>
-            <div className="ck-main"><span className="ck-t">{String(c.text)}</span>{c.done && c.done_by_name ? <span className="ck-by">{String(c.done_by_name)} · {ago(c.done_at)}</span> : null}</div>
+            <div className="ck-main"><span className="ck-t">{String(c.text)}</span>{c.done && c.done_by_name ? <span className="ck-by">{String(c.done_by_name)} · {fmtDateTime(c.done_at)}</span> : null}</div>
             {canEdit && people.length ? (
               <select className="ck-who" aria-label="Who does this" value={String(c.assignee_id ?? '')} onChange={(e) => void run(() => api.put(`/tasks/${taskId}/checklist/${c.id}`, { assignee_id: e.target.value || null }))}>
                 <option value="">Anyone</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -120,12 +120,12 @@ function Thread({ taskId, people }: { taskId: number; people: Person[] }) {
         {shown.length ? (
           <div className="th">
             {shown.map((n) => (isLog(n) ? (
-              <div className="th-log" key={n.id}><Icon name="activity" /><span>{n.kind === 'history' && <b>{n.user_name} </b>}{n.body}</span><span className="faint">· {ago(n.created_at)}</span></div>
+              <div className="th-log" key={n.id}><Icon name="activity" /><span>{n.kind === 'history' && <b>{n.user_name} </b>}{n.body}</span><span className="faint">· {fmtDateTime(n.created_at)}</span></div>
             ) : (
               <div className="th-c" key={n.id}>
                 <Avatar name={n.user_name} />
                 <div className="th-b">
-                  <div className="th-meta"><b>{n.user_name}</b><span className="faint">{ago(n.created_at)}{n.edited_at ? ' · edited' : ''}</span><span className="grow" />
+                  <div className="th-meta"><b>{n.user_name}</b><span className="faint">{fmtDateTime(n.created_at)}{n.edited_at ? ' · edited' : ''}</span><span className="grow" />
                     {n.user_id === user.id && <button type="button" className="btn ghost sm" onClick={() => setEditing({ id: n.id, text: n.body })}>Edit</button>}
                     {(n.user_id === user.id || isFounder) && (
                       <button type="button" className="btn ghost sm icon" aria-label="Delete comment" onClick={async () => {
@@ -197,7 +197,7 @@ export function TaskModal({ taskId, onClose }: { taskId: number; onClose(): void
   if (!t) return <Modal title="Task" size="xl" onClose={onClose}><div className="empty">{taskQ.isError ? (taskQ.error as Error).message : 'Loading…'}</div></Modal>;
   const days = t.due_date ? daysUntil(String(t.due_date)) : null;
   return (
-    <Modal title={String(t.title)} sub={[taskKey(t.id), t.project_name || 'No project', t.client_name].filter(Boolean).join(' · ')} size="xl" onClose={onClose}
+    <Modal title={String(t.title)} sub={<>{taskKey(t.id)} · {t.project_id ? <ProjectLink id={t.project_id} name={t.project_name} /> : 'No project'}{t.client_name ? <> · <ClientLink id={t.client_id} name={t.client_name} /></> : null}</>} size="xl" onClose={onClose}
       footer={canEdit ? (
         <>
           <button type="button" className="btn" onClick={() => { onClose(); editor.open({ resource: 'tasks', record: t }); }}><Icon name="edit" />Edit task</button>

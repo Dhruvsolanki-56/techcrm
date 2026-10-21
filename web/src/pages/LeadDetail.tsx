@@ -57,7 +57,7 @@ export default function LeadDetail() {
     <Page title={String(l.company || l.name)} crumbs={<><Crumb to="/leads">Pipeline</Crumb><b>{String(l.company || l.name)}</b></>}
       actions={<>
         {!closed && <button type="button" className="btn" onClick={() => setLog(true)}><Icon name="phone" />Log contact</button>}
-        {isFounder && !['lost', 'closed', 'won'].includes(String(l.stage)) && <button type="button" className="btn accent" onClick={() => setConvert(true)}><Icon name="check" />{l.client_id ? 'Start the work' : 'Convert to client'}</button>}
+        {isFounder && !['lost', 'closed', 'won', 'accepted'].includes(String(l.stage)) && <button type="button" className="btn accent" onClick={() => setConvert(true)}><Icon name="check" />{l.client_id ? 'Start the work' : 'Convert to client'}</button>}
         {isFounder && <button type="button" className="btn" onClick={() => nav(`/quotes/new?lead=${lid}`)}>New quotation</button>}
         <button type="button" className="btn" onClick={() => editor.open({ resource: 'leads', record: l, onDone: (r) => { if (!r) nav('/leads'); } })}><Icon name="edit" />Edit</button>
       </>}>
@@ -66,10 +66,10 @@ export default function LeadDetail() {
           <RecHead name={String(l.company || l.name)} refId={l.ref}
             meta={<><Badge value={l.stage} /><Heat value={l.priority} />{l.company && l.company !== l.name ? <Meta>{String(l.name)}</Meta> : null}
               {l.department ? <Meta>{String(l.department)}{l.business_side ? ` · ${String(l.business_side)}` : ''}</Meta> : null}
-              {l.client_id ? <Link to={`/clients/${l.client_id}`}>{l.stage === 'won' ? 'Now a client →' : `Existing client: ${String(l.client_name ?? '')} →`}</Link> : null}</>} />
+              {l.client_id ? <Link to={`/clients/${l.client_id}`}>{l.stage === 'won' ? 'Now a client →' : l.stage === 'accepted' ? 'Client (waiting for the first payment) →' : `Existing client: ${String(l.client_name ?? '')} →`}</Link> : null}{l.project_id ? <Link to={`/projects/${l.project_id}`}>Project: {String(l.project_name)} →</Link> : null}</>} />
           <Highlights>
             <Hl label="Deal value" value={Number(l.value) ? money(l.value) : '—'} sub={`Probability ${l.probability ?? 0}% · weighted ${money((Number(l.value) * Number(l.probability || 0)) / 100)}`} />
-            <Hl label="Next follow-up" value={l.next_followup && !closed ? fmtDate(l.next_followup).replace(/ \d{4}$/, '') : '—'}
+            <Hl label="Next follow-up" value={l.next_followup && !closed ? fmtDate(l.next_followup) : '—'}
               sub={closed ? 'Deal ended' : `${String(l.followup_status ?? '')}${fuDays !== null ? (fuDays < 0 ? ` · ${-fuDays} days late` : fuDays === 0 ? ' · today' : ` · in ${fuDays} days`) : ''}`}
               tone={fuDays !== null && fuDays < 0 && !closed ? 'bad' : ''} />
             <Hl label="Follow-up round" value={labelOf(FOLLOWUP_ROUNDS, String(l.followup_round)) || '—'} sub={l.last_contact ? `Last contact ${fmtDate(l.last_contact)}` : 'No contact logged'} />

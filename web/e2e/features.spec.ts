@@ -35,8 +35,7 @@ test.beforeAll(async ({ browser }) => {
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.waitForSelector('.side');
   // fixtures
-  const settings = await api<Record<string, string>>('GET', '/settings');
-  await api('PUT', '/settings', { gstin: '', lead_services: 'Website\nWeb application', lead_products: 'SaaS product', lead_sources: 'Referral\nWebsite', lead_categories: 'NGO\nRetail', default_tax_type: settings.default_tax_type });
+  await api('PUT', '/settings', { lead_services: 'Website\nWeb application', lead_products: 'SaaS product', lead_sources: 'Referral\nWebsite', lead_categories: 'NGO\nRetail' });
   const made = await page.request.post('/api/users', { data: { name: 'Ira Intern', email: 'ira@e2e.test', role: 'intern', password: 'Intern-Pass-2026', modules: [] }, headers: { 'X-Requested-With': 'crm' } });
   ids.user = made.ok() ? ((await made.json()) as { id: number }).id : ((await api<{ id: number; email: string }[]>('GET', '/users')).find((u) => u.email === 'ira@e2e.test') as { id: number }).id;
   const client = await api<{ id: number }>('POST', '/clients', { company: 'Lotus Traders', industry: 'Retail', city: 'Surat', status: 'active' });
@@ -57,28 +56,28 @@ test.afterAll(async () => { await page.context().close(); });
 test.describe('pipeline', () => {
   test('when the server fails the board says so and Try again recovers (never a blank or endless Loading)', async () => {
     await page.route('**/api/leads?**', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"Something went wrong on our side."}' }));
-    await go('/leads');
+    await go('/leads?view=board');
     await expect(page.getByText('This did not load')).toBeVisible({ timeout: 20_000 });
     await page.unroute('**/api/leads?**');
     await page.getByRole('button', { name: 'Try again' }).click();
     await expect(page.locator('.kcard').first()).toBeVisible();
   });
   test('shows every open lead as a card in its stage, with counts, and the header numbers', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     for (const n of 'ABCDEF') await expect(page.locator('.kcard', { hasText: `Pipeline Co ${n}` })).toBeVisible({ timeout: 10_000 });
     for (const stage of ['New', 'Contacted', 'Qualified', 'Demo/Meeting', 'Proposal Sent', 'Negotiation']) await expect(page.locator('.kcol-h', { hasText: stage })).toBeVisible();
     await expect(page.locator('.pt .sub')).toContainText('open lead');
     await expect(page.locator('.pt .sub')).toContainText('₹');
   });
   test('clicking a card opens the lead; Back returns to the board', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     await page.locator('.kcard', { hasText: 'Pipeline Co A' }).click();
     await expect(page).toHaveURL(new RegExp(`/leads/${ids.lead0}`));
     await page.goBack();
     await expect(page.locator('.kcard').first()).toBeVisible();
   });
   test('the card menu moves a lead to another stage without dragging', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     const card = page.locator('.kcard', { hasText: 'Pipeline Co A' });
     await card.getByRole('button', { name: /Actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Qualified' }).click();
@@ -87,13 +86,13 @@ test.describe('pipeline', () => {
     expect((await api<{ stage: string }>('GET', `/leads/${ids.lead0}`)).stage).toBe('qualified');
   });
   test('dragging a card to another column moves it', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     const card = page.locator('.kcol', { hasText: 'Contacted' }).locator('.kcard', { hasText: 'Pipeline Co B' });
     await card.dragTo(page.locator('.kcol', { hasText: 'Demo/Meeting' }));
     await expect(page.locator('.kcol', { hasText: 'Demo/Meeting' }).locator('.kcard', { hasText: 'Pipeline Co B' })).toBeVisible();
   });
   test('the card menu schedules a follow-up and logs a contact', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     const card = page.locator('.kcard', { hasText: 'Pipeline Co C' });
     await card.getByRole('button', { name: /Actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Follow up tomorrow' }).click();
@@ -106,7 +105,7 @@ test.describe('pipeline', () => {
     await expect(toast('Saved')).toBeVisible();
   });
   test('marking a lead lost asks why and moves it out of the open board', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     const card = page.locator('.kcard', { hasText: 'Pipeline Co F' });
     await card.getByRole('button', { name: /Actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Lost' }).click();
@@ -117,7 +116,7 @@ test.describe('pipeline', () => {
     await expect(page.locator('.kcol', { hasText: 'Lost' }).locator('.kcard', { hasText: 'Pipeline Co F' })).toBeVisible();
   });
   test('search, priority and department filters narrow the board and clear again', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     await page.getByRole('searchbox', { name: 'Search leads' }).fill('Pipeline Co D');
     await expect(page.locator('.kcard')).toHaveCount(1);
     await page.getByRole('searchbox', { name: 'Search leads' }).fill('');
@@ -139,7 +138,7 @@ test.describe('pipeline', () => {
     await expect(page).toHaveURL(/\/leads\/\d+/);
   });
   test('a new lead can be an individual with no company', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     await page.getByRole('button', { name: 'New lead' }).click();
     await page.getByLabel('Contact person').fill('Solo Freelancer');
     await save('Create lead');
@@ -149,7 +148,7 @@ test.describe('pipeline', () => {
     expect(found[0]?.company ?? '').toBe('');
   });
   test('a new lead can be a new company, and one with nothing filled in is refused', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     await page.getByRole('button', { name: 'New lead' }).click();
     await save('Create lead');
     await expect(page.getByRole('dialog').getByRole('alert').first()).toContainText('pick an existing client');
@@ -159,7 +158,7 @@ test.describe('pipeline', () => {
     await expect(page.locator('.kcard', { hasText: 'Brand New Pvt Ltd' })).toBeVisible();
   });
   test('a new lead for an existing client takes the client’s details and is marked as such', async () => {
-    await go('/leads');
+    await go('/leads?view=board');
     await page.getByRole('button', { name: 'New lead' }).click();
     await page.locator('select[name="client_id"]').selectOption({ label: 'Lotus Traders' });
     await page.getByLabel('Requirement / Interested In').fill('Mobile app for their store');
@@ -331,7 +330,7 @@ test.describe('clients and projects', () => {
     await expect(page.getByText('Add wishlist')).toBeVisible();
   });
   test('my work: board drag, list, filters', async () => {
-    await go('/tasks?scope=all');
+    await go('/tasks?scope=all&view=board');
     await expect(page.locator('.kcard').first()).toBeVisible();
     await page.locator('.kcard', { hasText: 'Design the homepage' }).first().dragTo(page.locator('.kcol', { hasText: 'In progress' }));
     await expect(page.locator('.kcol', { hasText: 'In progress' }).locator('.kcard', { hasText: 'Design the homepage' }).first()).toBeVisible();
@@ -345,11 +344,11 @@ test.describe('clients and projects', () => {
 /* ===================================== CHANGE REQUESTS ===================================== */
 test.describe('change requests', () => {
   test('board, drag between columns, list, and the dialog moves status, quotes and bills', async () => {
-    await go('/change-requests');
+    await go('/change-requests?view=board');
     await expect(page.locator('.kcard', { hasText: 'Add wishlist' })).toBeVisible();
     await page.locator('.kcard', { hasText: 'Add wishlist' }).dragTo(page.locator('.kcol', { hasText: 'Estimated' }));
     await expect(page.locator('.kcol', { hasText: 'Estimated' }).locator('.kcard', { hasText: 'Add wishlist' })).toBeVisible();
-    await page.locator('.kcard', { hasText: 'Add wishlist' }).click();
+    await page.locator('.kcard', { hasText: 'Add wishlist' }).locator('.t').click();
     await page.getByRole('button', { name: 'Create quotation' }).click();
     await expect(page).toHaveURL(/\/quotes\/\d+/);
     await go('/change-requests?view=list');
@@ -378,11 +377,13 @@ test.describe('quotations and invoices', () => {
     await expect(page).toHaveURL(/\/quotes\/\d+/);
     await expect(page.locator('.sheet')).toContainText('Loyalty module');
     await page.getByRole('button', { name: 'Mark as sent' }).click();
-    await page.getByRole('button', { name: 'Accepted', exact: true }).click();
-    await page.getByRole('button', { name: 'Accept & start project' }).click();
-    await expect(page).toHaveURL(/\/projects\/\d+/);
-    await page.getByRole('tab', { name: 'Finance' }).click();
-    await page.getByLabel('Set a payment schedule').selectOption({ label: '50% advance, 50% on delivery' });
+    await page.getByRole('button', { name: 'Client accepted — start the work' }).click();
+    // one step: the project exists and the payment planner opens at once
+    await expect(page).toHaveURL(/\/projects\/\d+\?tab=finance/);
+    const plan = page.getByRole('dialog');
+    await expect(plan).toContainText('Plan the payments');
+    await plan.getByLabel('Percentages').fill('50, 50');
+    await save('Save schedule');
     await expect(page.locator('tbody tr', { hasText: 'Advance' })).toContainText('₹30,000');
   });
   test('invoice: create, edit, duplicate, reminder, payment with TDS, cancel is refused after payment', async () => {
@@ -498,28 +499,28 @@ test.describe('finance', () => {
 
 /* ===================================== SUBSCRIPTIONS ===================================== */
 test.describe('subscriptions', () => {
-  test('a company subscription debits itself; a personal one is only tracked; a one-off amount is used once', async () => {
+  test('what the company pays debits itself as an expense; what someone else pays is only listed; there are no switches to tick', async () => {
     await go('/renewals');
-    for (const [name, scope, cost] of [['Team Chat Tool', 'The company (debited automatically)', '1200'], ['My Own Editor', 'A person (tracked only, not deducted)', '800']]) {
-      await page.getByRole('button', { name: 'New item' }).click();
+    for (const [name, scope, cost] of [['Team Chat Tool', 'company', '1200'], ['My Own Editor', 'personal', '800']]) {
+      await page.getByRole('button', { name: 'New subscription' }).click();
       await page.locator('input[name="name"]').fill(name as string);
       await page.locator('select[name="kind"]').selectOption('subscription');
-      await page.locator('input[name="renewal_date"]').fill('2026-01-05');
+      await page.locator('input[name="renewal_date"]').fill('05 Jan 2026'); // dates are typed as 05 Jan 2026 (05-01-2026 works too)
       await page.locator('select[name="cycle"]').selectOption('monthly');
       await page.locator('input[name="our_cost"]').fill(cost as string);
-      await page.locator('select[name="scope"]').selectOption({ label: scope as string });
-      await page.locator('input[name="auto_debit"]').check();
+      await page.locator('select[name="scope"]').selectOption(scope as string);
+      if (scope === 'personal') await page.locator('select[name="owner_id"]').selectOption({ index: 1 });
+      else await expect(page.locator('select[name="owner_id"]')).toHaveCount(0); // the person only matters when someone else pays
+      await expect(page.locator('input[name="auto_debit"]')).toHaveCount(0);
+      await expect(page.locator('input[name="amount_varies"]')).toHaveCount(0);
+      await expect(page.locator('input[name="next_amount"]')).toHaveCount(0);
       await save('Create renewal');
       await expect(toast('Created')).toBeVisible();
     }
     const exp = await api<{ vendor: string; amount: number }[]>('GET', '/expenses?q=Team%20Chat&limit=200');
     expect(exp.length).toBeGreaterThan(0);
     expect((await api<unknown[]>('GET', '/expenses?q=My%20Own&limit=50')).length).toBe(0);
-    await expect(page.locator('tbody tr', { hasText: 'My Own Editor' })).toContainText('Person');
-    await page.locator('tbody tr', { hasText: 'Team Chat Tool' }).getByRole('button', { name: /Edit/ }).click();
-    await page.locator('input[name="next_amount"]').fill('1500');
-    await save('Save changes');
-    await expect(page.locator('tbody tr', { hasText: 'Team Chat Tool' })).toContainText('next: ₹1,500');
+    await expect(page.locator('tbody tr', { hasText: 'My Own Editor' })).toContainText('only listed');
   });
 });
 
@@ -540,10 +541,10 @@ test.describe('the rest of the system', () => {
     await expect(page.locator('tbody tr', { hasText: 'Contact form broken' })).toBeVisible();
     await go('/calendar');
     await page.getByRole('button', { name: 'Reminder' }).first().click();
-    await page.getByLabel('Title').fill('GST filing');
+    await page.getByLabel('Title').fill('Income tax advance');
     await page.getByLabel('Date').fill(new Date().toISOString().slice(0, 10));
     await save('Create event');
-    await expect(page.locator('.ev', { hasText: 'GST filing' }).first()).toBeVisible();
+    await expect(page.locator('.ev', { hasText: 'Income tax advance' }).first()).toBeVisible();
     await go('/documents');
     await page.getByRole('button', { name: 'Add document' }).click();
     await page.getByRole('button', { name: 'Save a link' }).click();
@@ -578,11 +579,36 @@ test.describe('the rest of the system', () => {
     await page.getByRole('button', { name: /Notifications/ }).first().click();
     await expect(page.locator('.popover')).toBeVisible();
   });
+  test('tranches: your own percentages, the TDS ratio, net invoices, and a warning when work starts before the advance', async () => {
+    const pid = (await api<{ id: number }>('POST', '/projects', { client_id: ids.client, name: 'Tranche Test Site', status: 'planning', budget: 100000 })).id;
+    await go(`/projects/${pid}?tab=finance`);
+    await page.getByRole('button', { name: 'Plan the payments' }).click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByLabel('Percentages').fill('20, 30');
+    await expect(dlg).toContainText('add up to 50%');
+    await expect(dlg.getByRole('button', { name: 'Save schedule' })).toBeDisabled();
+    await dlg.getByLabel('Percentages').fill('30, 30, 40');
+    await dlg.getByLabel('TDS percent').fill('10');
+    await expect(dlg.locator('tfoot')).toContainText('₹90,000'); // what you receive of ₹1,00,000
+    await save('Save schedule');
+    await expect(toast('Payment schedule set')).toBeVisible();
+    await expect(page.locator('tbody tr', { hasText: 'Advance' })).toContainText('receive ₹27,000');
+    await page.getByRole('button', { name: 'Raise invoice' }).first().click();
+    await expect(page.getByRole('dialog')).toContainText('TDS % the client deducts'); // the project has TDS, so ask whether this payment has it too
+    await save('Save');
+    await expect(page).toHaveURL(/\/invoices\/\d+/);
+    await expect(page.locator('.kpi', { hasText: 'Total' }).first()).toContainText('₹27,000');
+    await expect(page.getByText('also deduct ₹3,000.00 TDS')).toBeVisible();
+    // starting work before the advance is paid asks first
+    await api('PUT', `/projects/${pid}`, { status: 'active' });
+    await go(`/projects/${pid}`);
+    await expect(page.getByRole('alert').filter({ hasText: 'advance of' })).toBeVisible();
+  });
   test('the action center puts the money still to get first, with what is left on each project', async () => {
     await go('/actions');
     const money = page.locator('.ac-money');
     await expect(money).toContainText('Money still to get');
-    await expect(money.locator('tr', { hasText: 'Lotus Storefront' })).toContainText('not invoiced yet');
+    await expect(money.locator('tr', { hasText: 'Lotus Storefront' }).first()).toContainText('not invoiced yet');
     await expect(page.locator('.kpi', { hasText: 'Still to get' })).toContainText('₹');
     await expect(page.locator('.sev-pill').first()).toBeVisible();
     await go('/analytics?tab=receivables');

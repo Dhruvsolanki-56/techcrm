@@ -118,14 +118,21 @@ describe('pagination, search, sorting and filters are done by the server', () =>
     await wb.xlsx.load(x.body as never);
     const ws = wb.worksheets[0] as ExcelJS.Worksheet;
     expect(ws.rowCount).toBeGreaterThan(18); // header + every lead (more than one page of 5 above)
-    expect(String(ws.getRow(1).getCell(1).value)).toBe('Ref');
+    expect(String(ws.getRow(1).getCell(1).value)).toBe('TechSentinals (demo)'); // the company's name heads every sheet
+    expect(String(ws.getRow(2).getCell(1).value)).toBe('Leads');
+    expect(String(ws.getRow(5).getCell(1).value)).toBe('ID'); // the header row
+    expect(ws.views[0]).toMatchObject({ state: 'frozen', ySplit: 5 });
     const px = await get('/api/payments/export.xlsx');
     const pwb = new ExcelJS.Workbook();
     await pwb.xlsx.load(px.body as never);
-    const heads = ((pwb.worksheets[0] as ExcelJS.Worksheet).getRow(1).values as unknown[]).slice(1).map(String);
+    const heads = ((pwb.worksheets[0] as ExcelJS.Worksheet).getRow(5).values as unknown[]).slice(1).map(String);
     expect(heads).toContain('TDS'); // acronyms read properly
     expect(heads).not.toContain('Import key'); // nothing internal leaks into a spreadsheet people share
-    expect(heads.filter((h) => /(^|\s)id$/i.test(h))).toEqual([]);
+    expect(heads.filter((h) => /_id$/i.test(h))).toEqual([]); // no raw ids (the ID column is the human system ID)
+    // real dates and numbers, not text
+    const payRow = (pwb.worksheets[0] as ExcelJS.Worksheet).getRow(6);
+    expect(payRow.getCell(heads.indexOf('Date') + 1).value).toBeInstanceOf(Date);
+    expect(typeof payRow.getCell(heads.indexOf('Amount') + 1).value).toBe('number');
     const filtered = await get('/api/leads/export.xlsx?stage=won');
     const wb2 = new ExcelJS.Workbook();
     await wb2.xlsx.load(filtered.body as never);

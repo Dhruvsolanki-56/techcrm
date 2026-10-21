@@ -1,5 +1,6 @@
 import { addDays, CLOSED_STAGES, CONTACT_KINDS, FOLLOWUP_ROUNDS, LEAD_STAGES, today } from '@crm/shared';
 import { useState } from 'react';
+import { DateInput } from '../ui/DateInput';
 import { useNavigate } from 'react-router-dom';
 import { api, type Row } from '../lib/api';
 import { fmtDate, money } from '../lib/format';
@@ -34,7 +35,7 @@ export function LogContactModal({ lead, onClose }: { lead: Row; onClose(): void 
         {!ended && (
           <>
             <label className="f"><span>Follow-Up Round</span><select value={v.followup_round} onChange={set('followup_round')}>{FOLLOWUP_ROUNDS.map(([a, b]) => <option key={a} value={a}>{b}</option>)}</select></label>
-            <label className="f"><span>Next Follow-Up Date</span><input type="date" value={v.next_followup} onChange={set('next_followup')} /></label>
+            <label className="f"><span>Next Follow-Up Date</span><DateInput value={v.next_followup} onChange={set('next_followup')} /></label>
             <label className="f full"><span>Next Action</span><input value={v.next_action} onChange={set('next_action')} placeholder="e.g. Send demo video and pricing" /></label>
           </>
         )}

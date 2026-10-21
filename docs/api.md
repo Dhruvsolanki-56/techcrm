@@ -65,9 +65,9 @@ Ids in the path must be plain integers; `/projects/1%20OR%201=1` is a 404, not p
 | `POST /leads/:id/contact` | log a call / WhatsApp / meeting, move the stage and set the next follow-up in one step |
 | `POST /leads/:id/convert` | lead → client (+ main contact, notes and files moved); `create_project`, `project_name`, `quote_id` optional — an accepted quotation sets the project's value |
 | `POST /change-requests/:id/quote` | creates a quotation from the request's estimate (one open quote per request) |
-| `POST /quotes/:id/to-invoice` | draft invoice carrying the client, project and change request; the quote becomes accepted |
-| `POST /projects/:id/schedule` | split the agreed value with a ready-made payment schedule (`template`: `full`, `50-50`, `40-30-30`, `30-30-40`); refused once any payment is invoiced |
-| `POST /milestones/:id/invoice` | draft invoice for one payment of the schedule; the payment then follows the invoice (`ready → invoiced → overdue / paid`) |
+| `POST /quotes/:id/to-invoice` | draft invoice carrying the client, project and change request (net of the project's TDS %); the quote becomes accepted. Idempotent: a second call returns the existing invoice (`existing: true`) |
+| `POST /projects/:id/schedule` | split the agreed value: a ready-made `template` (`full`, `50-50`, `40-30-30`, `30-30-40`) **or your own `percents` (e.g. `[25, 25, 50]`, must total 100)**, plus an optional `tds_percent` for the project; invoiced payments are kept, a payment whose invoice was cancelled is replanned |
+| `POST /milestones/:id/invoice` | draft invoice for one payment of the schedule, net of the project's TDS % (the expected TDS is kept on the invoice); the payment then follows the invoice (`ready → invoiced → overdue / paid`) |
 | `POST /quotes/:id/start-project` | accepted quotation of an existing client → new project (value = quotation) |
 | `POST /renewals/:id/renew` | roll a manual renewal's date forward one cycle |
 | `POST /bank-match` | match unmatched statement lines to income / expenses (same amount, within 5 days) |

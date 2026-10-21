@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEditor } from '../forms/RecordEditor';
 import { api, qs, type Row } from '../lib/api';
-import { money, plural } from '../lib/format';
+import { fmtDate, money, plural } from '../lib/format';
 import { useAct, useGet, useParam } from '../lib/hooks';
 import { settingList, useSession } from '../lib/session';
 import { useDialogs } from '../ui/Modal';
@@ -17,8 +17,9 @@ import { useRef, useState } from 'react';
 import { Badge, Due, ErrorBox, FollowupStatus, Heat, LogoSq, Seg, Who } from '../ui/primitives';
 import { ExportMenu } from '../ui/ExportMenu';
 import { Link } from 'react-router-dom';
+import { LinkTo } from './common';
 
-const STAGE_TONE: Record<string, string> = { new: 'var(--faint)', contacted: 'var(--blue)', qualified: '#4f8fb8', meeting: '#5b7fd6', proposal: 'var(--accent)', negotiation: 'var(--plum)', won: 'var(--green)', closed: 'var(--muted)', lost: 'var(--red)', nurture: '#c47f17' };
+const STAGE_TONE: Record<string, string> = { new: 'var(--faint)', contacted: 'var(--blue)', qualified: '#4f8fb8', meeting: '#5b7fd6', proposal: 'var(--accent)', negotiation: 'var(--plum)', accepted: '#2f9e6f', won: 'var(--green)', closed: 'var(--muted)', lost: 'var(--red)', nurture: '#c47f17' };
 const FILTERS = ['department', 'category', 'priority', 'market', 'owner_id', 'source', 'followup_status'] as const;
 
 export function LeadCard({ l, menu }: { l: Row; menu?: (anchor: HTMLElement, l: Row) => void }) {
@@ -50,7 +51,8 @@ export default function Leads() {
   const nav = useNavigate();
   const dialogs = useDialogs();
   const [sp, setSp] = useSearchParams();
-  const [view, setView] = useParam('view', (() => { try { return localStorage.getItem('leadView') || 'board'; } catch { return 'board'; } })());
+  const [view, setView] = useParam('view', 'list');
+  const [showFilters, setShowFilters] = useState(false);
   const f: Record<string, string> = {};
   for (const k of FILTERS) { const v = sp.get(k); if (v) f[k] = v; }
   const q = sp.get('q') ?? '';
@@ -91,10 +93,10 @@ export default function Leads() {
   ];
 
   const cols: Column[] = [
-    { key: 'created_at', label: 'Added', cls: 'opt nowrap', sort: 'created_at', render: (r) => String(r.created_at).slice(0, 10) },
+    { key: 'created_at', label: 'Added', cls: 'opt nowrap', sort: 'created_at', render: (r) => fmtDate(r.created_at) },
     {
       key: 'company', label: 'Company / Person', sort: 'company',
-      render: (r) => <div className="who"><LogoSq name={r.company || r.name} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis">{String(r.company || r.name)}</div><div className="t2 ellipsis">{[r.company && r.company !== r.name ? r.name : '', r.phone].filter(Boolean).join(' · ')}</div></div></div>,
+      render: (r) => <div className="who"><LogoSq name={r.company || r.name} size="sm" /><div style={{ minWidth: 0 }}><div className="t1 ellipsis"><LinkTo to={`/leads/${String(r.id)}`}>{String(r.company || r.name)}</LinkTo></div><div className="t2 ellipsis">{[r.company && r.company !== r.name ? r.name : '', r.phone].filter(Boolean).join(' · ')}</div></div></div>,
     },
     { key: 'market', label: 'Market', cls: 'opt', render: (r) => String(r.market ?? '—') },
     { key: 'department', label: 'Department / Product', render: (r) => <>{String(r.department ?? '—')}<div className="t2">{String(r.business_side ?? '')}</div></> },
@@ -114,7 +116,7 @@ export default function Leads() {
   return (
     <Page title="Pipeline" crumbs={<b>Pipeline</b>}
       actions={<>
-        <Seg value={view as 'board' | 'list'} onChange={(v) => { setView(v); try { localStorage.setItem('leadView', v); } catch { /* ignore */ } }} options={[['board', 'Board'], ['list', 'List']]} />
+        <Seg value={view as 'board' | 'list'} onChange={setView} options={[['list', 'List'], ['board', 'Board']]} />
         {isFounder && <ExportMenu path="/leads/export" params={{ ...f, q }} />}
         <button type="button" className="btn primary" onClick={() => editor.open({ resource: 'leads', defaults: { owner_id: user.id, department: f.department ?? '', category: f.category ?? '' } })}><Icon name="plus" />New lead</button>
       </>}>
@@ -131,16 +133,19 @@ export default function Leads() {
       </nav>
       <div className="toolbar lead-tb">
         <input type="search" placeholder="Search company, person, phone…" aria-label="Search leads" value={q} onChange={(e) => setParam('q', e.target.value)} />
+        <button type="button" className={`btn tb-filter-btn${selects.some(([k]) => f[k]) ? ' on' : ''}`} aria-expanded={showFilters} onClick={() => setShowFilters((o) => !o)}><Icon name="list" />Filters{selects.filter(([k]) => f[k]).length ? <span className="tb-count">{selects.filter(([k]) => f[k]).length}</span> : null}</button>
+        <div className={`tb-filters${showFilters ? ' open' : ''}`}>
         {selects.map(([k, label, opts]) => (
           <select key={k} aria-label={label} value={f[k] ?? ''} onChange={(e) => setParam(k, e.target.value)}>
             <option value="">{label}</option>
             {opts.map((o) => (typeof o === 'string' ? <option key={o} value={o}>{o}</option> : <option key={o[0]} value={o[0]}>{o[1]}</option>))}
           </select>
         ))}
+        </div>
         {view === 'board' && <label className="check" style={{ marginLeft: 'auto' }}><input type="checkbox" checked={showClosed} onChange={(e) => setParam('closed', e.target.checked ? '1' : '')} /><span>Show closed &amp; lost</span></label>}
       </div>
       {view === 'list' ? (
-        <DataTable resource="leads" query={params} exportable={false} columns={cols} noSearch defaultSort="created_at:desc" noun="lead" onRow={(r) => nav(`/leads/${r.id}`)}
+        <DataTable resource="leads" query={params} exportable={false} filtersOpen={showFilters} columns={cols} noSearch defaultSort="created_at:desc" noun="lead" onRow={(r) => nav(`/leads/${r.id}`)}
           filters={[{ key: 'stage', label: 'All stages', options: LEAD_STAGES }, { key: 'followup_round', label: 'Any round', options: FOLLOWUP_ROUNDS }]}
           empty={{ title: 'No leads match', text: 'Clear a filter to see more, or add a new lead.' }} />
       ) : board.isError ? <ErrorBox error={board.error} retry={() => void board.refetch()} /> : board.isPending ? <div className="tbl"><div className="empty">Loading…</div></div> : (

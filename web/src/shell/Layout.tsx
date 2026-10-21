@@ -43,8 +43,10 @@ export function Layout() {
   useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true); } };
+    const openSearch = (): void => setPalette(true);
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    window.addEventListener('crm:search', openSearch);
+    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('crm:search', openSearch); };
   }, []);
 
   const att = useAttention();
@@ -83,6 +85,13 @@ export function Layout() {
             : <Boundary resetKey={loc.pathname + loc.search}><Suspense fallback={<Skeleton />}><Outlet /></Suspense></Boundary>}
         </main>
       </div>
+      <nav className="tabbar" aria-label="Quick tabs">
+        <NavLink to="/dashboard"><Icon name="home" /><span>Home</span></NavLink>
+        <NavLink to="/actions"><Icon name="alert" /><span>Actions</span>{urgent > 0 ? <s className="tab-dot" aria-label={`${urgent} need you`}>{urgent > 9 ? '9+' : urgent}</s> : null}</NavLink>
+        {can('leads') ? <NavLink to="/leads"><Icon name="target" /><span>Pipeline</span></NavLink> : <NavLink to="/tasks"><Icon name="check" /><span>My work</span></NavLink>}
+        <NavLink to="/projects"><Icon name="briefcase" /><span>Projects</span></NavLink>
+        <button type="button" className={menu ? 'on' : ''} aria-expanded={menu} onClick={() => setMenu((m) => !m)}><Icon name="menu" /><span>More</span></button>
+      </nav>
       {meMenu && (
         <Popover anchor={meBtn.current} onClose={() => setMeMenu(false)} className="narrow" placement="above">
           <div style={{ padding: '10px 14px 8px' }}><div style={{ fontWeight: 600 }}>{user.name}</div><div className="small muted">{user.email}</div></div>

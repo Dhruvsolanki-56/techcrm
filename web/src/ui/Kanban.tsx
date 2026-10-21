@@ -10,7 +10,7 @@ export function Kanban<T extends Row = Row>({ cols, items, group, card, onMove, 
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   return (
-    <div className="kanban" style={colMin ? { gridAutoColumns: `minmax(${colMin}px, 1fr)` } : undefined}>
+    <div className="kanban" tabIndex={0} role="region" aria-label="Board" style={colMin ? { gridAutoColumns: `minmax(${colMin}px, 1fr)` } : undefined}>
       {cols.map((c) => {
         const list = items.filter((i) => group(i) === c.v);
         return (

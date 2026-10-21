@@ -87,6 +87,8 @@ export const errorHandler = (ctx: AppContext): ErrorRequestHandler => (err, req:
     return;
   }
   if (e.code === 'LIMIT_FILE_SIZE') { res.status(413).json({ error: 'File is larger than 60 MB.' }); return; }
+  const rule = /crm: (.+)/.exec(e.message ?? '');
+  if (rule) { res.status(409).json({ error: rule[1] }); return; } // a rule the database itself enforces, in plain words
   if (/UNIQUE constraint/.test(e.message ?? '')) { res.status(409).json({ error: 'That value already exists (it must be unique).' }); return; }
   if (/FOREIGN KEY/.test(e.message ?? '')) {
     res.status(409).json({ error: req.method === 'DELETE' ? 'This record is still used by other records, so it cannot be deleted.' : 'One of the records you picked (client, project, invoice, account …) no longer exists. Refresh and choose again.' });
